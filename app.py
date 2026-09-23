@@ -635,7 +635,7 @@ def _windsor_account_status_code(value):
     return mapping.get(text, value)
 
 
-def _windsor_rows(api_key, fields, date_from=None, date_to=None, select_accounts=None):
+def _windsor_rows(api_key, fields, date_from=None, date_to=None, select_accounts=None, include_objects_without_insights=False):
     if not api_key:
         return [], {"message": "Windsor API key is not configured on this device."}
 
@@ -650,6 +650,8 @@ def _windsor_rows(api_key, fields, date_from=None, date_to=None, select_accounts
         params["date_to"] = date_to
     if select_accounts and select_accounts != "all":
         params["select_accounts"] = str(select_accounts).removeprefix("act_")
+    if include_objects_without_insights:
+        params["include_objects_without_insights"] = "true"
 
     try:
         response = requests.get(
@@ -742,6 +744,7 @@ def _windsor_report(api_key, since, until, selected="all"):
         date_from=since,
         date_to=until,
         select_accounts=selected,
+        include_objects_without_insights=True,
     )
     if err:
         return {
@@ -788,10 +791,10 @@ def _windsor_report(api_key, since, until, selected="all"):
                 "account_name": account_meta[aid]["name"],
                 "currency": account_meta[aid]["currency"],
                 "campaign_id": str(item.get("campaign_id") or ""),
-                "campaign_name": item.get("campaign") or "",
+                "campaign_name": item.get("campaign") or (f"Campaign {item.get('campaign_id')}" if item.get("campaign_id") else ""),
                 "campaign_status": item.get("campaign_effective_status") or "",
                 "adset_id": str(item.get("adset_id") or ""),
-                "adset_name": item.get("adset_name") or "",
+                "adset_name": item.get("adset_name") or (f"Ad set {item.get('adset_id')}" if item.get("adset_id") else ""),
                 "adset_status": item.get("adset_effective_status") or "",
                 "ad_id": ad_id,
                 "ad_name": item.get("ad_name") or "",
