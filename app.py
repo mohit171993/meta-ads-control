@@ -995,7 +995,7 @@ def api_report():
     preset, since, until = _date_range()
     selected = (request.args.get("account") or "all").removeprefix("act_")
 
-    windsor_key = _windsor_key_from_request()
+    windsor_key = _windsor_key()
     if windsor_key:
         result = _windsor_report(windsor_key, since, until, selected)
         result.update({
