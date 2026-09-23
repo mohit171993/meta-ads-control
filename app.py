@@ -4,6 +4,7 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
+from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, Response
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -13,6 +14,7 @@ app = Flask(__name__)
 
 GRAPH_VERSION = os.getenv("META_GRAPH_VERSION", "v26.0")
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
+WINDSOR_KEY_FILE = Path("/data/windsor_api_key")
 
 
 # ---------- auth / config ----------
@@ -153,7 +155,7 @@ def windsor_logout():
 
 @app.before_request
 def _protect_dashboard():
-    if request.path == "/dashboard" or request.path.startswith("/api/"):
+    if request.path == "/dashboard" or request.path.startswith("/api/") or request.path == "/windsor-data-setup":
         return _require_dashboard_auth()
     return None
 
@@ -594,10 +596,43 @@ WINDSOR_FIELDS = ",".join([
 ])
 
 
-def _windsor_key_from_request():
-    # The key is supplied by the WebView as a request header so it never appears
-    # in the dashboard URL or Railway request logs. It is not persisted server-side.
-    return (request.headers.get("X-Windsor-Key") or "").strip()[:1024]
+def _windsor_key():
+    env_key = (os.getenv("WINDSOR_API_KEY") or "").strip()
+    if env_key:
+        return env_key
+    try:
+        if WINDSOR_KEY_FILE.exists():
+            return WINDSOR_KEY_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _save_windsor_key(value):
+    key = (value or "").strip()
+    if not key:
+        raise ValueError("Windsor API key is required")
+    WINDSOR_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    WINDSOR_KEY_FILE.write_text(key, encoding="utf-8")
+    try:
+        os.chmod(WINDSOR_KEY_FILE, 0o600)
+    except Exception:
+        pass
+
+
+def _windsor_account_status_code(value):
+    text = str(value or "").upper()
+    mapping = {
+        "ACTIVE": 1,
+        "DISABLED": 2,
+        "UNSETTLED": 3,
+        "PENDING_RISK_REVIEW": 7,
+        "PENDING_SETTLEMENT": 8,
+        "IN_GRACE_PERIOD": 9,
+        "PENDING_CLOSURE": 100,
+        "CLOSED": 101,
+    }
+    return mapping.get(text, value)
 
 
 def _windsor_rows(api_key, fields, date_from=None, date_to=None, select_accounts=None):
@@ -695,7 +730,7 @@ def _windsor_accounts(api_key):
             "name": row.get("account_name") or f"Ad Account {aid}",
             "currency": row.get("currency") or "",
             "timezone": row.get("account_timezone") or "",
-            "account_status": row.get("account_status") or "UNKNOWN",
+            "account_status": _windsor_account_status_code(row.get("account_status") or "UNKNOWN"),
         }
     return list(found.values()), []
 
@@ -743,7 +778,7 @@ def _windsor_report(api_key, since, until, selected="all"):
             "name": item.get("account_name") or f"Ad Account {aid}",
             "currency": item.get("currency") or "",
             "timezone": item.get("account_timezone") or "",
-            "account_status": item.get("account_status") or "UNKNOWN",
+            "account_status": _windsor_account_status_code(item.get("account_status") or "UNKNOWN"),
         }
 
         key = (aid, ad_id)
@@ -888,6 +923,39 @@ def _windsor_report(api_key, since, until, selected="all"):
     }
 
 
+@app.route("/windsor-data-setup", methods=["GET", "POST"])
+def windsor_data_setup():
+    message = ""
+    error = ""
+    configured = bool(_windsor_key())
+
+    if request.method == "POST":
+        key = request.form.get("api_key", "")
+        try:
+            # Validate before persisting so a typo cannot break the dashboard.
+            rows, test_error = _windsor_rows(
+                key,
+                "account_id,account_name,account_status,currency",
+            )
+            if test_error:
+                error = test_error.get("message") or "Windsor API key validation failed."
+            elif not rows:
+                error = "Windsor connected, but no Facebook Ads accounts were returned."
+            else:
+                _save_windsor_key(key)
+                configured = True
+                message = f"Windsor connected successfully. {len(rows)} row(s) returned in validation."
+        except Exception as exc:
+            error = str(exc)
+
+    return render_template(
+        "windsor_setup.html",
+        configured=configured,
+        message=message,
+        error=error,
+    )
+
+
 # ---------- dashboard ----------
 
 @app.get("/")
@@ -902,7 +970,7 @@ def dashboard():
 
 @app.get("/api/accounts")
 def api_accounts():
-    windsor_key = _windsor_key_from_request()
+    windsor_key = _windsor_key()
     if windsor_key:
         accounts, errors = _windsor_accounts(windsor_key)
         return jsonify({
@@ -1016,6 +1084,7 @@ def health():
         "token_configured": bool(_tokens()),
         "ad_account_configured": bool(_account_id()),
         "dashboard_enabled": bool(os.getenv("DASHBOARD_PASSWORD")),
+        "windsor_configured": bool(_windsor_key()),
     })
 
 
