@@ -45,13 +45,6 @@ tbody tr:hover{background:#15203a}
 .ARCHIVED,.HISTORICAL{background:#2a2d37;color:#a9b0c0}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.filters input{min-width:260px}
 .err{background:#4b1c24;color:#ffd9df;padding:10px;border-radius:10px;margin:8px 0;display:none}
-.source-panel{display:none;background:linear-gradient(180deg,#11182b,#162038);border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
-.source-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.source-title{font-weight:800;font-size:15px}.source-status{font-size:11px;color:var(--muted)}
-.source-form{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.source-form input{flex:1;min-width:220px}
-.source-form a{display:inline-flex;align-items:center;text-decoration:none;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.source-note{color:var(--muted);font-size:11px;margin-top:8px;line-height:1.45}
-.good-note{color:#5ff0a5}
 .footer{color:var(--muted);font-size:11px;margin-top:10px}
 @media(max-width:1100px){.cards{grid-template-columns:repeat(4,1fr)}.row{grid-template-columns:1fr}}
 @media(max-width:650px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:12px}}
@@ -62,7 +55,7 @@ tbody tr:hover{background:#15203a}
   <div class="top">
     <div class="title">
       <h1>Meta Ads Command Center</h1>
-      <p>All Facebook ad accounts in one place · auto-refresh every 60 seconds · <span id="dataSource">checking source…</span></p>
+      <p>All Facebook ad accounts in one place · auto-refresh every 60 seconds</p>
     </div>
     <div class="controls">
       <select id="accountSel"><option value="all">All accounts</option></select>
@@ -75,23 +68,6 @@ tbody tr:hover{background:#15203a}
   </div>
 
   <div id="error" class="err"></div>
-
-  <div id="sourcePanel" class="source-panel">
-    <div class="source-head">
-      <div>
-        <div class="source-title">Connect live Windsor data</div>
-        <div id="sourceMessage" class="source-status">Your direct Meta API connection is blocked. Windsor's Facebook connection can be used instead.</div>
-      </div>
-      <div id="sourceState" class="source-status"></div>
-    </div>
-    <div class="source-form">
-      <input id="windsorKey" type="password" inputmode="text" autocomplete="off" placeholder="Windsor API key">
-      <button id="connectWindsor" type="button">Connect Windsor</button>
-      <button id="clearWindsor" type="button">Clear key</button>
-      <a href="https://onboard.windsor.ai/" target="_blank" rel="noopener">Open Windsor</a>
-    </div>
-    <div class="source-note">Enter the key here inside the APK, not in chat. It is saved only in this WebView on this device and sent to this dashboard over HTTPS in a request header; the backend does not persist it.</div>
-  </div>
 
   <div class="cards">
     <div class="card"><div class="k">Spend</div><div class="v" id="spend">—</div></div>
@@ -161,24 +137,6 @@ tbody tr:hover{background:#15203a}
 <script>
 let currentRange='today', rawAds=[], accountMap={};
 
-function windsorKey(){ return (localStorage.getItem('windsor_api_key')||'').trim(); }
-function apiHeaders(){ const k=windsorKey(); return k ? {'X-Windsor-Key':k} : {}; }
-function apiFetch(url){ return fetch(url,{headers:apiHeaders()}); }
-function setSourceLabel(source){
-  const el=document.getElementById('dataSource');
-  el.textContent=source==='windsor'?'Windsor.ai live data':(source==='meta_direct'?'Meta direct':'checking source…');
-}
-function showSourcePanel(message,state){
-  const p=document.getElementById('sourcePanel');
-  p.style.display='block';
-  document.getElementById('sourceMessage').textContent=message||'Connect Windsor to load live Meta data.';
-  const s=document.getElementById('sourceState');
-  s.textContent=state||'';
-  s.className='source-status';
-}
-function hideSourcePanel(){
-  document.getElementById('sourcePanel').style.display='none';
-}
 function esc(v){ return String(v??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s])); }
 function n(v){ return Number(v||0).toLocaleString(); }
 function money(v,c){
@@ -188,21 +146,18 @@ function money(v,c){
 }
 function badge(s){ const k=String(s||'UNKNOWN').toUpperCase(); return '<span class="badge '+esc(k)+'">'+esc(k.replaceAll('_',' '))+'</span>'; }
 function accountStatusInfo(code){
-  const stringCode=String(code??'').toUpperCase();
-  const stringMap={
-    ACTIVE:['ACTIVE','Active'],DISABLED:['DISABLED','Disabled'],CLOSED:['CLOSED','Closed'],
-    UNSETTLED:['UNSETTLED','Unsettled'],PENDING_RISK_REVIEW:['PENDING_RISK_REVIEW','Pending risk review'],
-    PENDING_SETTLEMENT:['PENDING_SETTLEMENT','Pending settlement'],IN_GRACE_PERIOD:['IN_GRACE_PERIOD','In grace period'],
-    PENDING_CLOSURE:['PENDING_CLOSURE','Pending closure']
-  };
-  if(stringMap[stringCode]) return stringMap[stringCode];
   const map={
-    1:['ACTIVE','Active'],2:['DISABLED','Disabled'],3:['UNSETTLED','Unsettled'],
-    7:['PENDING_RISK_REVIEW','Pending risk review'],8:['PENDING_SETTLEMENT','Pending settlement'],
-    9:['IN_GRACE_PERIOD','In grace period'],100:['PENDING_CLOSURE','Pending closure'],101:['CLOSED','Closed']
+    1:['ACTIVE','Active'],
+    2:['DISABLED','Disabled'],
+    3:['UNSETTLED','Unsettled'],
+    7:['PENDING_RISK_REVIEW','Pending risk review'],
+    8:['PENDING_SETTLEMENT','Pending settlement'],
+    9:['IN_GRACE_PERIOD','In grace period'],
+    100:['PENDING_CLOSURE','Pending closure'],
+    101:['CLOSED','Closed']
   };
   const k=Number(code);
-  return map[k]||['UNKNOWN', code===null||code===undefined||code===''?'Unknown':'Status '+code];
+  return map[k]||['UNKNOWN', code===null||code===undefined?'Unknown':'Status '+code];
 }
 function accountStatusBadge(code){
   const [klass,label]=accountStatusInfo(code);
@@ -210,56 +165,27 @@ function accountStatusBadge(code){
 }
 
 async function loadAccounts(){
+  const r=await fetch('/api/accounts'); const j=await r.json();
   const sel=document.getElementById('accountSel');
-  const previous=sel.value||'all';
-  try{
-    const r=await apiFetch('/api/accounts'); const j=await r.json();
-    setSourceLabel(j.source);
-    sel.innerHTML='<option value="all">All accounts</option>';
-    accountMap={};
-    (j.accounts||[]).forEach(a=>{
-      accountMap[a.id]=a;
-      const o=document.createElement('option');const [,statusLabel]=accountStatusInfo(a.account_status);
-      o.value=a.id;
-      o.textContent=(a.name||a.id)+' · '+statusLabel+(a.currency?' · '+a.currency:'');
-      sel.appendChild(o);
-    });
-    if([...sel.options].some(o=>o.value===previous)) sel.value=previous;
-
-    if(j.source==='windsor' && !(j.errors||[]).filter(Boolean).length){
-      hideSourcePanel();
-    }else if(j.needs_windsor_key && !windsorKey()){
-      showSourcePanel('Meta direct API access is blocked. Your Windsor Facebook connection is working, so connect it here once to restore live data.','Windsor key required');
-    }else if((j.errors||[]).filter(Boolean).length && windsorKey()){
-      showSourcePanel('Windsor could not load with the saved key. Replace it with the current API key from your Windsor account.','Check Windsor key');
-    }
-  }catch(err){
-    showSourcePanel('Could not reach the dashboard data service. Reopen the app or try Refresh now.','Connection error');
-  }
+  sel.innerHTML='<option value="all">All accounts</option>';
+  (j.accounts||[]).forEach(a=>{
+    accountMap[a.id]=a;
+    const o=document.createElement('option');const [,statusLabel]=accountStatusInfo(a.account_status);
+    o.value=a.id;
+    o.textContent=(a.name||a.id)+' · '+statusLabel+(a.currency?' · '+a.currency:'');
+    sel.appendChild(o);
+  });
 }
 async function loadReport(){
   document.getElementById('refreshBtn').textContent='Refreshing…';
   const account=document.getElementById('accountSel').value||'all';
-  const r=await apiFetch('/api/report?range='+encodeURIComponent(currentRange)+'&account='+encodeURIComponent(account));
+  const r=await fetch('/api/report?range='+encodeURIComponent(currentRange)+'&account='+encodeURIComponent(account));
   const j=await r.json();
-  setSourceLabel(j.source);
   document.getElementById('refreshBtn').textContent='Refresh now';
 
   if(j.errors&&j.errors.filter(Boolean).length){
-    const e=document.getElementById('error');e.style.display='block';
-    if(j.needs_windsor_key && !windsorKey()){
-      e.textContent='Meta direct API access is blocked. Connect Windsor below to load the live ad data already available in your Windsor account.';
-      showSourcePanel('Meta direct API access is blocked. Your Windsor Facebook connection is working, so connect it here once to restore live data.','Windsor key required');
-    }else if(j.source==='windsor'){
-      e.textContent='Windsor data could not be loaded with the saved key. Check or replace the Windsor API key below.';
-      showSourcePanel('Windsor could not load with the saved key. Replace it with the current API key from your Windsor account.','Check Windsor key');
-    }else{
-      e.textContent='Some Meta data could not be loaded.';
-    }
-  }else{
-    document.getElementById('error').style.display='none';
-    if(j.source==='windsor') hideSourcePanel();
-  }
+    const e=document.getElementById('error');e.style.display='block';e.textContent='Some Meta data could not be loaded. The rest of the dashboard is still available.';
+  }else document.getElementById('error').style.display='none';
 
   const o=j.overview||{};
   document.getElementById('spend').textContent=money(o.spend,o.currency);
@@ -346,30 +272,7 @@ document.getElementById('search').addEventListener('input',renderRows);
 document.getElementById('statusFilter').addEventListener('change',renderRows);
 document.getElementById('metricSort').addEventListener('change',renderRows);
 
-document.getElementById('connectWindsor').addEventListener('click',async()=>{
-  const input=document.getElementById('windsorKey');
-  const key=input.value.trim();
-  if(!key){ input.focus(); return; }
-  localStorage.setItem('windsor_api_key',key);
-  input.value='';
-  document.getElementById('sourceState').textContent='Checking…';
-  await loadAccounts();
-  await loadReport();
-});
-document.getElementById('clearWindsor').addEventListener('click',async()=>{
-  localStorage.removeItem('windsor_api_key');
-  document.getElementById('windsorKey').value='';
-  setSourceLabel('meta_direct');
-  showSourcePanel('Windsor key cleared. Meta direct API is currently blocked, so live data will stay unavailable until Windsor is connected again.','Key cleared');
-  await loadAccounts();
-  await loadReport();
-});
-
-(async()=>{
-  await loadAccounts();
-  await loadReport();
-  setInterval(loadReport,60000);
-})();
+(async()=>{await loadAccounts();await loadReport();setInterval(loadReport,60000);})();
 </script>
 </body>
 </html>
