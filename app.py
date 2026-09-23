@@ -575,6 +575,319 @@ def _fetch_account_report(account, since, until):
     }
 
 
+
+# ---------- Windsor.ai fallback ----------
+
+WINDSOR_CONNECTOR_URL = "https://connectors.windsor.ai/facebook"
+WINDSOR_FIELDS = ",".join([
+    "account_id","account_name","account_status","currency","account_timezone",
+    "campaign_id","campaign","campaign_effective_status",
+    "adset_id","adset_name","adset_effective_status",
+    "ad_id","ad_name","status","effective_status",
+    "spend","impressions","reach","clicks","ctr","cpc","cpm","frequency",
+    "actions_link_click","actions_landing_page_view","actions_leadgen_grouped",
+    "actions_complete_registration",
+    "actions_offsite_conversion_fb_pixel_complete_registration",
+    "actions_omni_complete_registration",
+    "actions_purchase","actions_offsite_conversion_fb_pixel_purchase",
+    "actions_omni_purchase","date"
+])
+
+
+def _windsor_key_from_request():
+    # The key is supplied by the WebView as a request header so it never appears
+    # in the dashboard URL or Railway request logs. It is not persisted server-side.
+    return (request.headers.get("X-Windsor-Key") or "").strip()[:1024]
+
+
+def _windsor_rows(api_key, fields, date_from=None, date_to=None, select_accounts=None):
+    if not api_key:
+        return [], {"message": "Windsor API key is not configured on this device."}
+
+    params = {
+        "api_key": api_key,
+        "fields": fields,
+        "_max_rows": 5000,
+    }
+    if date_from:
+        params["date_from"] = date_from
+    if date_to:
+        params["date_to"] = date_to
+    if select_accounts and select_accounts != "all":
+        params["select_accounts"] = str(select_accounts).removeprefix("act_")
+
+    try:
+        response = requests.get(
+            WINDSOR_CONNECTOR_URL,
+            params=params,
+            headers={"User-Agent": "Windsor-Dashboard/1.1"},
+            timeout=45,
+        )
+        try:
+            payload = response.json()
+        except Exception:
+            return [], {
+                "status": response.status_code,
+                "message": "Windsor returned a non-JSON response.",
+            }
+
+        if not response.ok:
+            message = payload.get("error") if isinstance(payload, dict) else None
+            return [], {
+                "status": response.status_code,
+                "message": str(message or "Windsor API request failed.")[:300],
+            }
+
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            if payload.get("error"):
+                return [], {"message": str(payload.get("error"))[:300]}
+            rows = payload.get("data")
+            if rows is None:
+                rows = payload.get("result")
+            if rows is None:
+                rows = payload.get("rows")
+            rows = rows or []
+        else:
+            rows = []
+
+        return [x for x in rows if isinstance(x, dict)], None
+    except requests.RequestException as exc:
+        return [], {"message": f"Windsor API connection failed: {str(exc)[:200]}"}
+
+
+def _to_float(value):
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+
+def _to_int(value):
+    try:
+        return int(round(float(value or 0)))
+    except Exception:
+        return 0
+
+
+def _first_nonzero(row, names):
+    for name in names:
+        value = _to_float(row.get(name))
+        if value:
+            return value
+    return 0.0
+
+
+def _windsor_accounts(api_key):
+    fields = "account_id,account_name,account_status,currency,account_timezone"
+    rows, err = _windsor_rows(api_key, fields)
+    if err:
+        return [], [err]
+
+    found = {}
+    for row in rows:
+        aid = str(row.get("account_id") or "").removeprefix("act_")
+        if not aid:
+            continue
+        found[aid] = {
+            "id": aid,
+            "name": row.get("account_name") or f"Ad Account {aid}",
+            "currency": row.get("currency") or "",
+            "timezone": row.get("account_timezone") or "",
+            "account_status": row.get("account_status") or "UNKNOWN",
+        }
+    return list(found.values()), []
+
+
+def _windsor_report(api_key, since, until, selected="all"):
+    raw_rows, err = _windsor_rows(
+        api_key,
+        WINDSOR_FIELDS,
+        date_from=since,
+        date_to=until,
+        select_accounts=selected,
+    )
+    if err:
+        return {
+            "overview": {
+                "spend": 0, "currency": "", "impressions": 0, "reach": 0,
+                "clicks": 0, "ctr": 0, "cpc": None, "results": 0,
+                "cost_per_result": None, "active_ads": 0, "review_ads": 0,
+                "disapproved_ads": 0,
+            },
+            "accounts": [],
+            "ads": [],
+            "errors": [err],
+        }
+
+    # Windsor returns one row per ad/date for multi-day ranges. Aggregate by ad
+    # so ad counts and totals are not multiplied by the number of days.
+    grouped = {}
+    account_meta = {}
+
+    for item in raw_rows:
+        aid = str(item.get("account_id") or "").removeprefix("act_")
+        ad_id = str(item.get("ad_id") or "")
+        if not aid:
+            continue
+        if not ad_id:
+            ad_id = "|".join([
+                str(item.get("campaign_id") or ""),
+                str(item.get("adset_id") or ""),
+                str(item.get("ad_name") or ""),
+            ])
+
+        account_meta[aid] = {
+            "id": aid,
+            "name": item.get("account_name") or f"Ad Account {aid}",
+            "currency": item.get("currency") or "",
+            "timezone": item.get("account_timezone") or "",
+            "account_status": item.get("account_status") or "UNKNOWN",
+        }
+
+        key = (aid, ad_id)
+        if key not in grouped:
+            grouped[key] = {
+                "account_id": aid,
+                "account_name": account_meta[aid]["name"],
+                "currency": account_meta[aid]["currency"],
+                "campaign_id": str(item.get("campaign_id") or ""),
+                "campaign_name": item.get("campaign") or "",
+                "campaign_status": item.get("campaign_effective_status") or "",
+                "adset_id": str(item.get("adset_id") or ""),
+                "adset_name": item.get("adset_name") or "",
+                "adset_status": item.get("adset_effective_status") or "",
+                "ad_id": ad_id,
+                "ad_name": item.get("ad_name") or "",
+                "status": item.get("status") or "",
+                "effective_status": item.get("effective_status") or item.get("status") or "",
+                "spend": 0.0,
+                "impressions": 0,
+                "reach": 0,
+                "clicks": 0,
+                "link_clicks": 0,
+                "landing_page_views": 0,
+                "leads": 0,
+                "registrations": 0,
+                "purchases": 0,
+                "budget_kind": "",
+                "budget_value": 0,
+            }
+
+        out = grouped[key]
+        out["spend"] += _to_float(item.get("spend"))
+        out["impressions"] += _to_int(item.get("impressions"))
+        out["reach"] += _to_int(item.get("reach"))
+        out["clicks"] += _to_int(item.get("clicks"))
+        out["link_clicks"] += _to_int(item.get("actions_link_click"))
+        out["landing_page_views"] += _to_int(item.get("actions_landing_page_view"))
+        out["leads"] += _to_int(item.get("actions_leadgen_grouped"))
+        out["registrations"] += _to_int(_first_nonzero(item, [
+            "actions_offsite_conversion_fb_pixel_complete_registration",
+            "actions_complete_registration",
+            "actions_omni_complete_registration",
+        ]))
+        out["purchases"] += _to_int(_first_nonzero(item, [
+            "actions_offsite_conversion_fb_pixel_purchase",
+            "actions_purchase",
+            "actions_omni_purchase",
+        ]))
+        out["status"] = item.get("status") or out["status"]
+        out["effective_status"] = (
+            item.get("effective_status") or item.get("status") or out["effective_status"]
+        )
+        out["campaign_status"] = item.get("campaign_effective_status") or out["campaign_status"]
+        out["adset_status"] = item.get("adset_effective_status") or out["adset_status"]
+
+    rows = []
+    for out in grouped.values():
+        out["spend"] = round(out["spend"], 2)
+        out["ctr"] = round(
+            (out["clicks"] / out["impressions"] * 100) if out["impressions"] else 0,
+            2,
+        )
+        out["cpc"] = round(out["spend"] / out["clicks"], 2) if out["clicks"] else 0
+        out["cpm"] = round(out["spend"] / out["impressions"] * 1000, 2) if out["impressions"] else 0
+        out["frequency"] = round(out["impressions"] / out["reach"], 2) if out["reach"] else 0
+        label, value = _primary_result(out)
+        out["result_type"] = label
+        out["results"] = int(value)
+        out["cost_per_result"] = round(out["spend"] / value, 2) if value else None
+        rows.append(out)
+
+    by_account = {}
+    for row in rows:
+        aid = row["account_id"]
+        if aid not in by_account:
+            by_account[aid] = {
+                "spend": 0.0, "impressions": 0, "reach": 0, "clicks": 0,
+                "results": 0, "active_ads": 0, "review_ads": 0,
+                "disapproved_ads": 0,
+            }
+        s = by_account[aid]
+        s["spend"] += row["spend"]
+        s["impressions"] += row["impressions"]
+        s["reach"] += row["reach"]
+        s["clicks"] += row["clicks"]
+        s["results"] += row["results"]
+        state = str(row.get("effective_status") or "").upper()
+        if state == "ACTIVE":
+            s["active_ads"] += 1
+        if state in {"IN_PROCESS", "PENDING_REVIEW", "WITH_ISSUES"}:
+            s["review_ads"] += 1
+        if state == "DISAPPROVED":
+            s["disapproved_ads"] += 1
+
+    account_summaries = []
+    currencies = set()
+    for aid, summary in by_account.items():
+        summary["spend"] = round(summary["spend"], 2)
+        summary["ctr"] = round(
+            summary["clicks"] / summary["impressions"] * 100, 2
+        ) if summary["impressions"] else 0
+        summary["cpc"] = round(
+            summary["spend"] / summary["clicks"], 2
+        ) if summary["clicks"] else 0
+        summary["cost_per_result"] = round(
+            summary["spend"] / summary["results"], 2
+        ) if summary["results"] else None
+        meta = account_meta.get(aid, {"id": aid, "name": aid, "currency": ""})
+        if meta.get("currency"):
+            currencies.add(meta["currency"])
+        account_summaries.append({"account": meta, "summary": summary, "error": None})
+
+    currencies.discard("")
+    same_currency = len(currencies) <= 1
+    total_spend = round(sum(x["spend"] for x in by_account.values()), 2)
+    total_impressions = sum(x["impressions"] for x in by_account.values())
+    total_reach = sum(x["reach"] for x in by_account.values())
+    total_clicks = sum(x["clicks"] for x in by_account.values())
+    total_results = sum(x["results"] for x in by_account.values())
+
+    overview = {
+        "spend": total_spend if same_currency else None,
+        "currency": next(iter(currencies), "") if same_currency else "MULTI",
+        "impressions": total_impressions,
+        "reach": total_reach,
+        "clicks": total_clicks,
+        "ctr": round(total_clicks / total_impressions * 100, 2) if total_impressions else 0,
+        "cpc": round(total_spend / total_clicks, 2) if total_clicks and same_currency else None,
+        "results": total_results,
+        "cost_per_result": round(total_spend / total_results, 2) if total_results and same_currency else None,
+        "active_ads": sum(x["active_ads"] for x in by_account.values()),
+        "review_ads": sum(x["review_ads"] for x in by_account.values()),
+        "disapproved_ads": sum(x["disapproved_ads"] for x in by_account.values()),
+    }
+
+    return {
+        "overview": overview,
+        "accounts": account_summaries,
+        "ads": sorted(rows, key=lambda x: (x.get("spend", 0), x.get("impressions", 0)), reverse=True),
+        "errors": [],
+    }
+
+
 # ---------- dashboard ----------
 
 @app.get("/")
@@ -589,10 +902,23 @@ def dashboard():
 
 @app.get("/api/accounts")
 def api_accounts():
+    windsor_key = _windsor_key_from_request()
+    if windsor_key:
+        accounts, errors = _windsor_accounts(windsor_key)
+        return jsonify({
+            "source": "windsor",
+            "accounts": accounts,
+            "errors": errors,
+            "needs_windsor_key": False,
+        })
+
     accounts, errors = _discover_accounts()
+    clean = [{k: v for k, v in a.items() if not k.startswith("_")} for a in accounts]
     return jsonify({
-        "accounts": [{k: v for k, v in a.items() if not k.startswith("_")} for a in accounts],
+        "source": "meta_direct",
+        "accounts": clean,
         "errors": errors,
+        "needs_windsor_key": bool(errors and not clean),
     })
 
 
@@ -600,6 +926,19 @@ def api_accounts():
 def api_report():
     preset, since, until = _date_range()
     selected = (request.args.get("account") or "all").removeprefix("act_")
+
+    windsor_key = _windsor_key_from_request()
+    if windsor_key:
+        result = _windsor_report(windsor_key, since, until, selected)
+        result.update({
+            "source": "windsor",
+            "range": preset,
+            "since": since,
+            "until": until,
+            "needs_windsor_key": False,
+        })
+        return jsonify(result)
+
     accounts, discovery_errors = _discover_accounts()
     if selected != "all":
         accounts = [a for a in accounts if a["id"] == selected]
@@ -650,14 +989,17 @@ def api_report():
         "disapproved_ads": sum((x.get("summary") or {}).get("disapproved_ads", 0) for x in reports),
     }
 
+    all_errors = discovery_errors + [r.get("error") for r in reports if r.get("error")]
     return jsonify({
+        "source": "meta_direct",
         "range": preset,
         "since": since,
         "until": until,
         "overview": overview,
         "accounts": account_summaries,
         "ads": sorted(all_ads, key=lambda x: (x.get("spend", 0), x.get("impressions", 0)), reverse=True),
-        "errors": discovery_errors + [r.get("error") for r in reports if r.get("error")],
+        "errors": all_errors,
+        "needs_windsor_key": bool(all_errors and not all_ads),
     })
 
 
