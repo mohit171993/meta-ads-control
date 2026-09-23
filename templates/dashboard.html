@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meta Ads Command Center</title>
+<style>
+:root{
+  --bg:#0b1020;--panel:#11182b;--panel2:#162038;--text:#edf2ff;--muted:#9fb0d0;
+  --good:#26d07c;--warn:#f5b942;--bad:#ff6b6b;--line:#25314f;--accent:#7aa2ff;
+}
+*{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+.wrap{max-width:1600px;margin:0 auto;padding:22px}
+.top{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:18px}
+.title h1{font-size:24px;margin:0 0 4px}.title p{margin:0;color:var(--muted);font-size:13px}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+select,input,button{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+button{cursor:pointer}.activeBtn{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.cards{display:grid;grid-template-columns:repeat(8,minmax(130px,1fr));gap:10px;margin:16px 0}
+.card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px;padding:14px}
+.card .k{color:var(--muted);font-size:12px}.card .v{font-size:22px;font-weight:700;margin-top:5px}
+.row{display:grid;grid-template-columns:1.2fr .8fr;gap:12px;margin:12px 0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;overflow:hidden}
+.panel h3{margin:0 0 10px;font-size:15px}
+.account-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:9px}
+.acct{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2)}
+.acct .name{font-weight:700}.small{font-size:12px;color:var(--muted)}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}.mini{background:#0e1628;border-radius:9px;padding:8px}
+.table-wrap{overflow:auto;max-height:65vh;border-radius:12px;border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;min-width:1500px;background:var(--panel)}
+th,td{padding:10px 9px;border-bottom:1px solid var(--line);text-align:right;font-size:12px;white-space:nowrap}
+th{position:sticky;top:0;background:#121b30;z-index:2;color:#b7c5e3}
+th:nth-child(-n+6),td:nth-child(-n+6){text-align:left}
+tbody tr:hover{background:#15203a}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:700;font-size:11px}
+.ACTIVE{background:#113b2a;color:#5ff0a5}.PAUSED,.ADSET_PAUSED,.CAMPAIGN_PAUSED{background:#33384b;color:#c8d0e8}
+.IN_PROCESS,.PENDING_REVIEW,.WITH_ISSUES{background:#4a3812;color:#ffd36c}.DISAPPROVED{background:#4b1c24;color:#ff9aa8}
+.ARCHIVED,.HISTORICAL{background:#2a2d37;color:#a9b0c0}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.filters input{min-width:260px}
+.err{background:#4b1c24;color:#ffd9df;padding:10px;border-radius:10px;margin:8px 0;display:none}
+.footer{color:var(--muted);font-size:11px;margin-top:10px}
+@media(max-width:1100px){.cards{grid-template-columns:repeat(4,1fr)}.row{grid-template-columns:1fr}}
+@media(max-width:650px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:12px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="title">
+      <h1>Meta Ads Command Center</h1>
+      <p>All Facebook ad accounts in one place · auto-refresh every 60 seconds</p>
+    </div>
+    <div class="controls">
+      <select id="accountSel"><option value="all">All accounts</option></select>
+      <button data-range="today" class="rangeBtn activeBtn">Today</button>
+      <button data-range="yesterday" class="rangeBtn">Yesterday</button>
+      <button data-range="7d" class="rangeBtn">7 days</button>
+      <button data-range="30d" class="rangeBtn">30 days</button>
+      <button id="refreshBtn">Refresh now</button>
+    </div>
+  </div>
+
+  <div id="error" class="err"></div>
+
+  <div class="cards">
+    <div class="card"><div class="k">Spend</div><div class="v" id="spend">—</div></div>
+    <div class="card"><div class="k">Impressions</div><div class="v" id="impressions">—</div></div>
+    <div class="card"><div class="k">Reach</div><div class="v" id="reach">—</div></div>
+    <div class="card"><div class="k">Clicks</div><div class="v" id="clicks">—</div></div>
+    <div class="card"><div class="k">CTR</div><div class="v" id="ctr">—</div></div>
+    <div class="card"><div class="k">CPC</div><div class="v" id="cpc">—</div></div>
+    <div class="card"><div class="k">Results</div><div class="v" id="results">—</div></div>
+    <div class="card"><div class="k">Active ads</div><div class="v" id="activeAds">—</div></div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <h3>Account performance</h3>
+      <div id="accountGrid" class="account-grid"></div>
+    </div>
+    <div class="panel">
+      <h3>Health</h3>
+      <div class="metrics">
+        <div class="mini"><div class="small">Active</div><b id="hActive">0</b></div>
+        <div class="mini"><div class="small">In review</div><b id="hReview">0</b></div>
+        <div class="mini"><div class="small">Disapproved</div><b id="hDisapproved">0</b></div>
+      </div>
+      <div class="footer" id="rangeLabel"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Ads</h3>
+    <div class="filters">
+      <input id="search" placeholder="Search account, campaign, ad set or ad…">
+      <select id="statusFilter">
+        <option value="all">All statuses</option>
+        <option value="ACTIVE">Active</option>
+        <option value="PAUSED">Paused</option>
+        <option value="review">In review / processing</option>
+        <option value="DISAPPROVED">Disapproved</option>
+        <option value="ARCHIVED">Archived / historical</option>
+      </select>
+      <select id="metricSort">
+        <option value="spend">Sort: Spend</option>
+        <option value="results">Sort: Results</option>
+        <option value="clicks">Sort: Clicks</option>
+        <option value="ctr">Sort: CTR</option>
+        <option value="cpc">Sort: CPC</option>
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Account</th><th>Campaign</th><th>Ad set</th><th>Ad</th><th>Status</th><th>Result type</th>
+            <th>Results</th><th>Cost/result</th><th>Spend</th><th>Impressions</th><th>Reach</th>
+            <th>Clicks</th><th>Link clicks</th><th>LPV</th><th>Leads</th><th>Registrations</th><th>Purchases</th>
+            <th>CTR</th><th>CPC</th><th>CPM</th><th>Frequency</th><th>Budget</th>
+          </tr>
+        </thead>
+        <tbody id="adRows"></tbody>
+      </table>
+    </div>
+    <div class="footer">Meta reporting can have a short delay. “Live” here means the latest data available from Meta’s Marketing API.</div>
+  </div>
+</div>
+
+<script>
+let currentRange='today', rawAds=[], accountMap={};
+
+function esc(v){ return String(v??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s])); }
+function n(v){ return Number(v||0).toLocaleString(); }
+function money(v,c){
+  if(v===null||v===undefined) return '—';
+  if(!c||c==='MULTI') return c==='MULTI' ? 'Multiple currencies' : Number(v||0).toFixed(2);
+  try{return new Intl.NumberFormat(undefined,{style:'currency',currency:c,maximumFractionDigits:2}).format(v||0)}catch(e){return c+' '+Number(v||0).toFixed(2)}
+}
+function badge(s){ const k=String(s||'UNKNOWN').toUpperCase(); return '<span class="badge '+esc(k)+'">'+esc(k.replaceAll('_',' '))+'</span>'; }
+
+async function loadAccounts(){
+  const r=await fetch('/api/accounts'); const j=await r.json();
+  const sel=document.getElementById('accountSel');
+  sel.innerHTML='<option value="all">All accounts</option>';
+  (j.accounts||[]).forEach(a=>{
+    accountMap[a.id]=a;
+    const o=document.createElement('option');o.value=a.id;o.textContent=(a.name||a.id)+(a.currency?' · '+a.currency:'');sel.appendChild(o);
+  });
+}
+async function loadReport(){
+  document.getElementById('refreshBtn').textContent='Refreshing…';
+  const account=document.getElementById('accountSel').value||'all';
+  const r=await fetch('/api/report?range='+encodeURIComponent(currentRange)+'&account='+encodeURIComponent(account));
+  const j=await r.json();
+  document.getElementById('refreshBtn').textContent='Refresh now';
+
+  if(j.errors&&j.errors.filter(Boolean).length){
+    const e=document.getElementById('error');e.style.display='block';e.textContent='Some Meta data could not be loaded. The rest of the dashboard is still available.';
+  }else document.getElementById('error').style.display='none';
+
+  const o=j.overview||{};
+  document.getElementById('spend').textContent=money(o.spend,o.currency);
+  document.getElementById('impressions').textContent=n(o.impressions);
+  document.getElementById('reach').textContent=n(o.reach);
+  document.getElementById('clicks').textContent=n(o.clicks);
+  document.getElementById('ctr').textContent=(o.ctr||0).toFixed(2)+'%';
+  document.getElementById('cpc').textContent=money(o.cpc,o.currency);
+  document.getElementById('results').textContent=n(o.results);
+  document.getElementById('activeAds').textContent=n(o.active_ads);
+  document.getElementById('hActive').textContent=n(o.active_ads);
+  document.getElementById('hReview').textContent=n(o.review_ads);
+  document.getElementById('hDisapproved').textContent=n(o.disapproved_ads);
+  document.getElementById('rangeLabel').textContent='Reporting period: '+j.since+' → '+j.until;
+
+  const grid=document.getElementById('accountGrid');grid.innerHTML='';
+  (j.accounts||[]).forEach(x=>{
+    const a=x.account||{},s=x.summary||{};
+    const div=document.createElement('div');div.className='acct';
+    div.innerHTML='<div class="name">'+esc(a.name||a.id)+'</div>'+
+      '<div class="small">'+esc(a.currency||'')+(a.timezone?' · '+esc(a.timezone):'')+'</div>'+
+      '<div class="metrics">'+
+      '<div class="mini"><div class="small">Spend</div><b>'+money(s.spend,a.currency)+'</b></div>'+
+      '<div class="mini"><div class="small">Clicks</div><b>'+n(s.clicks)+'</b></div>'+
+      '<div class="mini"><div class="small">Results</div><b>'+n(s.results)+'</b></div></div>';
+    grid.appendChild(div);
+  });
+  rawAds=j.ads||[]; renderRows();
+}
+
+function renderRows(){
+  const q=document.getElementById('search').value.toLowerCase().trim();
+  const sf=document.getElementById('statusFilter').value;
+  const sort=document.getElementById('metricSort').value;
+  let rows=rawAds.filter(x=>{
+    const hay=[x.account_name,x.campaign_name,x.adset_name,x.ad_name,x.effective_status].join(' ').toLowerCase();
+    if(q&&!hay.includes(q)) return false;
+    const st=String(x.effective_status||'').toUpperCase();
+    if(sf==='ACTIVE'&&st!=='ACTIVE') return false;
+    if(sf==='PAUSED'&&!['PAUSED','ADSET_PAUSED','CAMPAIGN_PAUSED'].includes(st)) return false;
+    if(sf==='review'&&!['IN_PROCESS','PENDING_REVIEW','WITH_ISSUES'].includes(st)) return false;
+    if(sf==='DISAPPROVED'&&st!=='DISAPPROVED') return false;
+    if(sf==='ARCHIVED'&&!['ARCHIVED','HISTORICAL'].includes(st)) return false;
+    return true;
+  });
+  rows.sort((a,b)=>(Number(b[sort]||0)-Number(a[sort]||0)));
+  const tb=document.getElementById('adRows');tb.innerHTML='';
+  rows.forEach(x=>{
+    const tr=document.createElement('tr');
+    const budget=x.budget_value?money(x.budget_value,x.currency)+' '+esc(x.budget_kind):'—';
+    tr.innerHTML=
+      '<td>'+esc(x.account_name)+'</td>'+
+      '<td>'+esc(x.campaign_name)+'</td>'+
+      '<td>'+esc(x.adset_name)+'</td>'+
+      '<td><b>'+esc(x.ad_name)+'</b><div class="small">'+esc(x.ad_id)+'</div></td>'+
+      '<td>'+badge(x.effective_status)+'</td>'+
+      '<td>'+esc(x.result_type)+'</td>'+
+      '<td>'+n(x.results)+'</td>'+
+      '<td>'+money(x.cost_per_result,x.currency)+'</td>'+
+      '<td>'+money(x.spend,x.currency)+'</td>'+
+      '<td>'+n(x.impressions)+'</td>'+
+      '<td>'+n(x.reach)+'</td>'+
+      '<td>'+n(x.clicks)+'</td>'+
+      '<td>'+n(x.link_clicks)+'</td>'+
+      '<td>'+n(x.landing_page_views)+'</td>'+
+      '<td>'+n(x.leads)+'</td>'+
+      '<td>'+n(x.registrations)+'</td>'+
+      '<td>'+n(x.purchases)+'</td>'+
+      '<td>'+Number(x.ctr||0).toFixed(2)+'%</td>'+
+      '<td>'+money(x.cpc,x.currency)+'</td>'+
+      '<td>'+money(x.cpm,x.currency)+'</td>'+
+      '<td>'+Number(x.frequency||0).toFixed(2)+'</td>'+
+      '<td>'+budget+'</td>';
+    tb.appendChild(tr);
+  });
+}
+document.querySelectorAll('.rangeBtn').forEach(b=>b.addEventListener('click',()=>{
+  currentRange=b.dataset.range;document.querySelectorAll('.rangeBtn').forEach(x=>x.classList.remove('activeBtn'));b.classList.add('activeBtn');loadReport();
+}));
+document.getElementById('accountSel').addEventListener('change',loadReport);
+document.getElementById('refreshBtn').addEventListener('click',loadReport);
+document.getElementById('search').addEventListener('input',renderRows);
+document.getElementById('statusFilter').addEventListener('change',renderRows);
+document.getElementById('metricSort').addEventListener('change',renderRows);
+
+(async()=>{await loadAccounts();await loadReport();setInterval(loadReport,60000);})();
+</script>
+</body>
+</html>
