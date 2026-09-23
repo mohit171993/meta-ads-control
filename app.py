@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 from flask import Flask, jsonify, redirect, render_template, request, Response
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import requests
 
 app = Flask(__name__)
@@ -55,7 +56,33 @@ def _account_id():
     return value.removeprefix("act_") if value else ""
 
 
+def _session_serializer():
+    secret = (
+        os.getenv("WINDSOR_SESSION_SECRET", "").strip()
+        or os.getenv("DASHBOARD_PASSWORD", "").strip()
+    )
+    if not secret:
+        return None
+    return URLSafeTimedSerializer(secret_key=secret, salt="windsor-dashboard-session")
+
+
+def _windsor_session_valid():
+    token = request.cookies.get("windsor_session", "")
+    serializer = _session_serializer()
+    if not token or not serializer:
+        return False
+    try:
+        payload = serializer.loads(token, max_age=60 * 60 * 24 * 7)
+    except (BadSignature, SignatureExpired):
+        return False
+    expected_user = os.getenv("DASHBOARD_USER", "admin")
+    return hmac.compare_digest(str(payload.get("u", "")), expected_user)
+
+
 def _dashboard_authorized():
+    if _windsor_session_valid():
+        return True
+
     user = os.getenv("DASHBOARD_USER", "admin")
     password = os.getenv("DASHBOARD_PASSWORD", "")
     if not password:
@@ -74,6 +101,54 @@ def _require_dashboard_auth():
         401,
         {"WWW-Authenticate": 'Basic realm="Meta Ads Dashboard"'},
     )
+
+
+@app.route("/windsor-login", methods=["GET", "POST"])
+def windsor_login():
+    if _windsor_session_valid():
+        return redirect("/dashboard")
+
+    error = ""
+    username = request.form.get("username", "admin")
+    if request.method == "POST":
+        expected_user = os.getenv("DASHBOARD_USER", "admin")
+        expected_password = os.getenv("DASHBOARD_PASSWORD", "")
+        supplied_user = request.form.get("username", "")
+        supplied_password = request.form.get("password", "")
+
+        if (
+            (not expected_password)
+            or (
+                hmac.compare_digest(supplied_user, expected_user)
+                and hmac.compare_digest(supplied_password, expected_password)
+            )
+        ):
+            serializer = _session_serializer()
+            response = redirect("/dashboard")
+            if serializer:
+                token = serializer.dumps({"u": expected_user})
+                response.set_cookie(
+                    "windsor_session",
+                    token,
+                    max_age=60 * 60 * 24 * 7,
+                    secure=True,
+                    httponly=True,
+                    samesite="Lax",
+                    path="/",
+                )
+            return response
+
+        error = "Incorrect username or password."
+        username = supplied_user or "admin"
+
+    return render_template("windsor_login.html", error=error, username=username)
+
+
+@app.get("/windsor-logout")
+def windsor_logout():
+    response = redirect("/windsor-login")
+    response.delete_cookie("windsor_session", path="/")
+    return response
 
 
 @app.before_request
