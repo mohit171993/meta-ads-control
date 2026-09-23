@@ -1,3 +1,4 @@
+import json
 import os
 from flask import Flask, jsonify, request
 import requests
@@ -108,6 +109,24 @@ def interests_batch():
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
     return jsonify({"queries": queries, "results": result})
+
+def _startup_selftest():
+    if os.getenv("META_STARTUP_SELFTEST", "0") != "1":
+        return
+    queries = ["cricket", "sports betting", "sportsbook", "fantasy cricket", "online gambling"]
+    report = {"graph_version": GRAPH_VERSION, "account": _account_id(), "queries": {}}
+    try:
+        for q in queries:
+            items, err = search_interest(q, 12)
+            report["queries"][q] = {
+                "results": [{"id": x.get("id"), "name": x.get("name")} for x in items],
+                "error": err,
+            }
+    except Exception as exc:
+        report["fatal_error"] = str(exc)
+    app.logger.warning("META_SELFTEST %s", json.dumps(report, separators=(",", ":")))
+
+_startup_selftest()
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
