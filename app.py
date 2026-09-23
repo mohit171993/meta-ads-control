@@ -80,6 +80,38 @@ def health():
         "ad_account_configured": bool(_account_id())
     })
 
+
+def search_location(query, limit=25):
+    account = _account_id()
+    attempts = []
+    if account:
+        attempts.append((f"act_{account}/targetingsearch", {"type": "adgeolocation", "q": query, "limit": limit}))
+    attempts.append(("search", {"type": "adgeolocation", "q": query, "limit": limit}))
+    last_error = None
+    for path, params in attempts:
+        payload, err = _meta_get(path, params)
+        if not err:
+            rows = []
+            for item in payload.get("data", []) or []:
+                if isinstance(item, dict):
+                    rows.append({k: item.get(k) for k in ("key","name","type","country_code","region","region_id","supports_region") if k in item})
+            return rows, None
+        last_error = err
+    return [], last_error
+
+@app.get("/locations")
+def locations():
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"error": "q is required"}), 400
+    try:
+        items, err = search_location(q, _safe_limit(request.args.get("limit")))
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    if err:
+        return jsonify({"error": "Meta location lookup failed", "detail": err}), 502
+    return jsonify({"query": q, "count": len(items), "results": items})
+
 @app.get("/interests")
 def interests():
     q = (request.args.get("q") or "").strip()
