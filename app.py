@@ -651,7 +651,9 @@ def _windsor_rows(api_key, fields, date_from=None, date_to=None, select_accounts
     if select_accounts and select_accounts != "all":
         params["select_accounts"] = str(select_accounts).removeprefix("act_")
     if include_objects_without_insights:
-        params["include_objects_without_insights"] = "true"
+        params["options"] = json.dumps({
+            "facebook": {"include_objects_without_insights": "true"}
+        })
 
     try:
         response = requests.get(
