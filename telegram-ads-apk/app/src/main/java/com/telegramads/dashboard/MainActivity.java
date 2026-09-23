@@ -20,6 +20,7 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     private static final String DASHBOARD_URL =
             "https://ads-manager-api-production.up.railway.app/dashboard";
+    private static final String APP_VERSION = "1.1";
     private WebView webView;
     private ProgressBar progressBar;
 
@@ -68,7 +69,7 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        refresh.setOnClickListener(v -> webView.reload());
+        refresh.setOnClickListener(v -> loadFreshDashboard());
 
         webView.setWebChromeClient(new android.webkit.WebChromeClient() {
             @Override
@@ -80,11 +81,23 @@ public class MainActivity extends Activity {
             }
         });
 
+        // Always fetch the newest remote dashboard HTML when the app starts.
+        webView.clearCache(true);
         if (savedInstanceState == null) {
-            webView.loadUrl(DASHBOARD_URL);
+            loadFreshDashboard();
         } else {
             webView.restoreState(savedInstanceState);
+            loadFreshDashboard();
         }
+    }
+
+    private void loadFreshDashboard() {
+        String freshUrl = DASHBOARD_URL
+                + "?app=android&v=" + APP_VERSION
+                + "&ts=" + System.currentTimeMillis();
+        webView.stopLoading();
+        webView.clearCache(true);
+        webView.loadUrl(freshUrl);
     }
 
     private void configureWebView() {
@@ -97,9 +110,9 @@ public class MainActivity extends Activity {
         settings.setLoadWithOverviewMode(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
         settings.setUserAgentString(
-                settings.getUserAgentString() + " TelegramAdsDashboard/1.0");
+                settings.getUserAgentString() + " TelegramAdsDashboard/" + APP_VERSION);
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
