@@ -25,6 +25,13 @@ button{cursor:pointer}.activeBtn{border-color:var(--accent);box-shadow:0 0 0 1px
 .account-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:9px}
 .acct{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2)}
 .acct .name{font-weight:700}.small{font-size:12px;color:var(--muted)}
+.acct-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+.acct-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:5px}
+.account-status{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:700;font-size:11px}
+.account-status.ACTIVE{background:#113b2a;color:#5ff0a5}
+.account-status.DISABLED,.account-status.CLOSED{background:#4b1c24;color:#ff9aa8}
+.account-status.UNSETTLED,.account-status.PENDING_RISK_REVIEW,.account-status.PENDING_SETTLEMENT,.account-status.IN_GRACE_PERIOD,.account-status.PENDING_CLOSURE{background:#4a3812;color:#ffd36c}
+.account-status.UNKNOWN{background:#2a2d37;color:#a9b0c0}
 .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}.mini{background:#0e1628;border-radius:9px;padding:8px}
 .table-wrap{overflow:auto;max-height:65vh;border-radius:12px;border:1px solid var(--line)}
 table{width:100%;border-collapse:collapse;min-width:1500px;background:var(--panel)}
@@ -138,6 +145,24 @@ function money(v,c){
   try{return new Intl.NumberFormat(undefined,{style:'currency',currency:c,maximumFractionDigits:2}).format(v||0)}catch(e){return c+' '+Number(v||0).toFixed(2)}
 }
 function badge(s){ const k=String(s||'UNKNOWN').toUpperCase(); return '<span class="badge '+esc(k)+'">'+esc(k.replaceAll('_',' '))+'</span>'; }
+function accountStatusInfo(code){
+  const map={
+    1:['ACTIVE','Active'],
+    2:['DISABLED','Disabled'],
+    3:['UNSETTLED','Unsettled'],
+    7:['PENDING_RISK_REVIEW','Pending risk review'],
+    8:['PENDING_SETTLEMENT','Pending settlement'],
+    9:['IN_GRACE_PERIOD','In grace period'],
+    100:['PENDING_CLOSURE','Pending closure'],
+    101:['CLOSED','Closed']
+  };
+  const k=Number(code);
+  return map[k]||['UNKNOWN', code===null||code===undefined?'Unknown':'Status '+code];
+}
+function accountStatusBadge(code){
+  const [klass,label]=accountStatusInfo(code);
+  return '<span class="account-status '+klass+'" title="Meta account status code: '+esc(code??'unknown')+'">'+esc(label)+'</span>';
+}
 
 async function loadAccounts(){
   const r=await fetch('/api/accounts'); const j=await r.json();
@@ -145,7 +170,10 @@ async function loadAccounts(){
   sel.innerHTML='<option value="all">All accounts</option>';
   (j.accounts||[]).forEach(a=>{
     accountMap[a.id]=a;
-    const o=document.createElement('option');o.value=a.id;o.textContent=(a.name||a.id)+(a.currency?' · '+a.currency:'');sel.appendChild(o);
+    const o=document.createElement('option');const [,statusLabel]=accountStatusInfo(a.account_status);
+    o.value=a.id;
+    o.textContent=(a.name||a.id)+' · '+statusLabel+(a.currency?' · '+a.currency:'');
+    sel.appendChild(o);
   });
 }
 async function loadReport(){
@@ -177,8 +205,9 @@ async function loadReport(){
   (j.accounts||[]).forEach(x=>{
     const a=x.account||{},s=x.summary||{};
     const div=document.createElement('div');div.className='acct';
-    div.innerHTML='<div class="name">'+esc(a.name||a.id)+'</div>'+
-      '<div class="small">'+esc(a.currency||'')+(a.timezone?' · '+esc(a.timezone):'')+'</div>'+
+    div.innerHTML='<div class="acct-head"><div class="name">'+esc(a.name||a.id)+'</div>'+accountStatusBadge(a.account_status)+'</div>'+
+      '<div class="small">Account ID: '+esc(a.id||'—')+'</div>'+
+      '<div class="acct-meta"><span class="small">'+esc(a.currency||'Currency unknown')+'</span>'+(a.timezone?'<span class="small">· '+esc(a.timezone)+'</span>':'')+'</div>'+
       '<div class="metrics">'+
       '<div class="mini"><div class="small">Spend</div><b>'+money(s.spend,a.currency)+'</b></div>'+
       '<div class="mini"><div class="small">Clicks</div><b>'+n(s.clicks)+'</b></div>'+
