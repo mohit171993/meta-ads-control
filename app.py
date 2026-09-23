@@ -1080,6 +1080,32 @@ def api_report():
 
 
 
+@app.get("/health/report-check")
+def health_report_check():
+    key = _windsor_key()
+    if not key:
+        return jsonify({"ok": False, "windsor_configured": False}), 503
+    today = date.today().isoformat()
+    result = _windsor_report(key, today, today, "all")
+    ads = result.get("ads") or []
+    target_id = "120249621855170298"
+    target = next((x for x in ads if str(x.get("ad_id")) == target_id), None)
+    return jsonify({
+        "ok": True,
+        "source": "windsor",
+        "ad_count": len(ads),
+        "has_gujarati": bool(target),
+        "gujarati": {
+            "ad_id": target.get("ad_id"),
+            "ad_name": target.get("ad_name"),
+            "effective_status": target.get("effective_status"),
+            "spend": target.get("spend"),
+            "impressions": target.get("impressions"),
+        } if target else None,
+    })
+
+
+
 @app.get("/health")
 def health():
     return jsonify({
