@@ -7,6 +7,12 @@ on:
     paths:
       - "telegram-ads-apk/**"
       - ".github/workflows/build-telegram-ads-apk.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "telegram-ads-apk/**"
+      - ".github/workflows/build-telegram-ads-apk.yml"
 
 jobs:
   build:
