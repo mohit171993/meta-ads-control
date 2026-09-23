@@ -145,15 +145,17 @@ def interests_batch():
 def _startup_selftest():
     if os.getenv("META_STARTUP_SELFTEST", "0") != "1":
         return
-    queries = ["cricket", "sports betting", "sportsbook", "fantasy cricket", "online gambling"]
-    report = {"graph_version": GRAPH_VERSION, "account": _account_id(), "queries": {}}
+    queries = ["cricket", "India national cricket team", "ICC", "Indian Premier League", "fantasy cricket", "sports betting", "online gambling", "sportsbook"]
+    report = {"graph_version": GRAPH_VERSION, "account": _account_id(), "queries": {}, "locations": {}}
     try:
         for q in queries:
-            items, err = search_interest(q, 12)
+            items, err = search_interest(q, 15)
             report["queries"][q] = {
                 "results": [{"id": x.get("id"), "name": x.get("name")} for x in items],
                 "error": err,
             }
+        locs, loc_err = search_location("Gujarat", 20)
+        report["locations"]["Gujarat"] = {"results": locs, "error": loc_err}
     except Exception as exc:
         report["fatal_error"] = str(exc)
     app.logger.warning("META_SELFTEST %s", json.dumps(report, separators=(",", ":")))
