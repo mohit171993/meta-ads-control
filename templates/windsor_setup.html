@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Windsor Data Setup</title>
+<style>
+:root{--bg:#0b1020;--panel:#11182b;--text:#edf2ff;--muted:#9fb0d0;--line:#25314f;--accent:#7aa2ff;--good:#26d07c;--bad:#ff8a9a}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:20px}
+.card{width:min(520px,100%);background:linear-gradient(180deg,#11182b,#162038);border:1px solid var(--line);border-radius:18px;padding:24px}
+h1{margin:0 0 6px;font-size:25px}.sub{color:var(--muted);font-size:13px;line-height:1.45;margin-bottom:18px}
+.status{padding:10px 12px;border-radius:10px;margin-bottom:14px;font-size:13px}.ok{background:#113b2a;color:#8df2bd}.err{background:#4b1c24;color:#ffd9df}
+label{display:block;color:var(--muted);font-size:12px;margin:12px 0 6px}
+input{width:100%;background:#0e1628;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:13px 14px;font-size:16px}
+button,a{display:inline-block;margin-top:14px;border-radius:12px;padding:12px 14px;text-decoration:none;font-weight:700;font-size:14px}
+button{border:0;background:var(--accent);color:#081226;cursor:pointer}a{border:1px solid var(--line);color:var(--text);margin-left:8px}
+.note{color:var(--muted);font-size:11px;line-height:1.45;margin-top:14px}
+</style>
+</head>
+<body>
+<form class="card" method="post" action="/windsor-data-setup" autocomplete="off">
+  <h1>Windsor Data Connection</h1>
+  <div class="sub">One-time setup for the morning Meta Ads dashboard. The key is stored server-side on the persistent Railway volume, not in the dashboard or APK.</div>
+
+  {% if configured and not error %}
+    <div class="status ok">Windsor data connection is configured.</div>
+  {% endif %}
+  {% if message %}
+    <div class="status ok">{{ message }}</div>
+  {% endif %}
+  {% if error %}
+    <div class="status err">{{ error }}</div>
+  {% endif %}
+
+  <label for="api_key">Windsor API key</label>
+  <input id="api_key" name="api_key" type="password" required autocomplete="new-password" placeholder="Paste Windsor API key">
+
+  <button type="submit">Save & test</button>
+  <a href="/dashboard">Back to dashboard</a>
+  <div class="note">Use the API key from your Windsor account. It is validated against your connected Facebook Ads source before it is saved.</div>
+</form>
+</body>
+</html>
