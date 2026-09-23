@@ -646,6 +646,27 @@ def interests_batch():
     return jsonify({"queries": queries, "results": result})
 
 
+
+def _startup_reporting_diag():
+    if os.getenv("META_REPORT_DIAG", "0") != "1":
+        return
+    token = _token()
+    aid = _account_id()
+    checks = {}
+    for label, path, params in [
+        ("me", "me", {"fields": "id,name"}),
+        ("permissions", "me/permissions", {}),
+        ("adaccounts", "me/adaccounts", {"fields": "id,name,account_status,currency,timezone_name,business_name", "limit": 20}),
+        ("account", f"act_{aid}", {"fields": "id,name,account_status,currency,timezone_name,business_name"}),
+        ("ads", f"act_{aid}/ads", {"fields": "id,name,status,effective_status,adset_id,campaign_id", "limit": 3}),
+        ("insights", f"act_{aid}/insights", {"level": "account", "fields": "spend,impressions,reach,clicks,ctr,cpc", "date_preset": "last_7d", "limit": 3}),
+    ]:
+        payload, err = _meta_get_with_token(token, path, params)
+        checks[label] = {"ok": err is None, "error": err, "sample": payload if err is None else None}
+    app.logger.warning("META_REPORT_DIAG %s", json.dumps(checks, separators=(",", ":")))
+
+_startup_reporting_diag()
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
