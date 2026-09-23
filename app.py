@@ -82,22 +82,23 @@ def health():
 
 
 def search_location(query, limit=25):
-    account = _account_id()
-    attempts = []
-    if account:
-        attempts.append((f"act_{account}/targetingsearch", {"type": "adgeolocation", "q": query, "limit": limit}))
-    attempts.append(("search", {"type": "adgeolocation", "q": query, "limit": limit}))
-    last_error = None
-    for path, params in attempts:
-        payload, err = _meta_get(path, params)
-        if not err:
-            rows = []
-            for item in payload.get("data", []) or []:
-                if isinstance(item, dict):
-                    rows.append({k: item.get(k) for k in ("key","name","type","country_code","region","region_id","supports_region") if k in item})
-            return rows, None
-        last_error = err
-    return [], last_error
+    params = {
+        "type": "adgeolocation",
+        "q": query,
+        "limit": limit,
+        "location_types": '["region"]'
+    }
+    payload, err = _meta_get("search", params)
+    if err:
+        return [], err
+    rows = []
+    for item in payload.get("data", []) or []:
+        if not isinstance(item, dict):
+            continue
+        row = {k: item.get(k) for k in ("key","name","type","country_code","region","region_id","supports_region") if k in item}
+        if row.get("type") == "region":
+            rows.append(row)
+    return rows, None
 
 @app.get("/locations")
 def locations():
