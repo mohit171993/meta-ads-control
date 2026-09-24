@@ -55,7 +55,7 @@ tbody tr:hover{background:#15203a}
   <div class="top">
     <div class="title">
       <h1>Meta Ads Command Center</h1>
-      <p>All Facebook ad accounts in one place · auto-refresh every 60 seconds</p>
+      <p>All Facebook ad accounts in one place · live status refresh every 15 seconds</p>
     </div>
     <div class="controls">
       <select id="accountSel"><option value="all">All accounts</option></select>
@@ -179,7 +179,7 @@ async function loadAccounts(){
 async function loadReport(){
   document.getElementById('refreshBtn').textContent='Refreshing…';
   const account=document.getElementById('accountSel').value||'all';
-  const r=await fetch('/api/report?range='+encodeURIComponent(currentRange)+'&account='+encodeURIComponent(account));
+  const r=await fetch('/api/report?range='+encodeURIComponent(currentRange)+'&account='+encodeURIComponent(account)+'&_ts='+Date.now(),{cache:'no-store'});
   const j=await r.json();
   document.getElementById('refreshBtn').textContent='Refresh now';
 
@@ -273,7 +273,13 @@ document.getElementById('search').addEventListener('input',renderRows);
 document.getElementById('statusFilter').addEventListener('change',renderRows);
 document.getElementById('metricSort').addEventListener('change',renderRows);
 
-(async()=>{await loadAccounts();await loadReport();setInterval(loadReport,60000);})();
+(async()=>{
+    await loadAccounts();
+    await loadReport();
+    setInterval(()=>{ if(!document.hidden) loadReport(); },15000);
+    document.addEventListener('visibilitychange',()=>{ if(!document.hidden) loadReport(); });
+    window.addEventListener('focus',()=>{ if(!document.hidden) loadReport(); });
+  })();
 </script>
 </body>
 </html>
