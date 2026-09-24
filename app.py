@@ -1034,6 +1034,43 @@ def dashboard():
     return render_template("dashboard.html")
 
 
+
+def _batraxy_analytics():
+    url = (os.getenv("BATRAXY_ANALYTICS_URL") or "").strip()
+    key = (os.getenv("BATRAXY_ANALYTICS_KEY") or "").strip()
+    if not url or not key:
+        return None, "Batraxy analytics is not configured."
+    try:
+        response = requests.get(
+            url,
+            headers={"X-Batraxy-Key": key, "User-Agent": "Meta-Ads-Dashboard/1.0"},
+            timeout=12,
+        )
+        try:
+            payload = response.json()
+        except Exception:
+            return None, "Batraxy analytics returned a non-JSON response."
+        if not response.ok:
+            return None, str(payload.get("error") or "Batraxy analytics request failed.")[:200]
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            return None, str((payload or {}).get("error") or "Batraxy analytics is unavailable.")[:200]
+        return payload, None
+    except Exception as exc:
+        return None, str(exc)[:200]
+
+
+@app.get("/api/batraxy")
+def api_batraxy():
+    payload, error = _batraxy_analytics()
+    response = jsonify({
+        "ok": bool(payload),
+        "data": payload,
+        "error": error,
+    })
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
+
+
 @app.get("/api/accounts")
 def api_accounts():
     windsor_key = _windsor_key()
