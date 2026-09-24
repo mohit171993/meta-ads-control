@@ -1040,80 +1040,102 @@ def api_report():
     preset, since, until = _date_range()
     selected = (request.args.get("account") or "all").removeprefix("act_")
 
+    # Prefer Meta's Marketing API for the live dashboard whenever the configured
+    # token can see the requested account. Windsor remains a fallback source.
+    if _tokens():
+        accounts, discovery_errors = _discover_accounts()
+        if selected != "all":
+            accounts = [a for a in accounts if a["id"] == selected]
+
+        if accounts:
+            reports = []
+            with ThreadPoolExecutor(max_workers=min(6, max(1, len(accounts)))) as pool:
+                futures = [pool.submit(_fetch_account_report, a, since, until) for a in accounts]
+                for future in as_completed(futures):
+                    try:
+                        reports.append(future.result())
+                    except Exception as exc:
+                        reports.append({"error": {"message": str(exc)}, "ads": []})
+
+            all_ads = []
+            account_summaries = []
+            currencies = set()
+            for report in reports:
+                if report.get("account"):
+                    currencies.add(report["account"].get("currency") or "")
+                all_ads.extend(report.get("ads") or [])
+                if report.get("account") and report.get("summary"):
+                    account_summaries.append({
+                        "account": report["account"],
+                        "summary": report["summary"],
+                        "error": report.get("error"),
+                    })
+
+            currencies.discard("")
+            same_currency = len(currencies) <= 1
+            spend = round(sum((x.get("summary") or {}).get("spend", 0) for x in reports), 2)
+            impressions = sum((x.get("summary") or {}).get("impressions", 0) for x in reports)
+            reach = sum((x.get("summary") or {}).get("reach", 0) for x in reports)
+            clicks = sum((x.get("summary") or {}).get("clicks", 0) for x in reports)
+            results = sum((x.get("summary") or {}).get("results", 0) for x in reports)
+
+            overview = {
+                "spend": spend if same_currency else None,
+                "currency": next(iter(currencies), "") if same_currency else "MULTI",
+                "impressions": impressions,
+                "reach": reach,
+                "clicks": clicks,
+                "ctr": round(clicks / impressions * 100, 2) if impressions else 0,
+                "cpc": round(spend / clicks, 2) if clicks and same_currency else None,
+                "results": results,
+                "cost_per_result": round(spend / results, 2) if results and same_currency else None,
+                "active_ads": sum((x.get("summary") or {}).get("active_ads", 0) for x in reports),
+                "review_ads": sum((x.get("summary") or {}).get("review_ads", 0) for x in reports),
+                "disapproved_ads": sum((x.get("summary") or {}).get("disapproved_ads", 0) for x in reports),
+            }
+
+            all_errors = discovery_errors + [r.get("error") for r in reports if r.get("error")]
+            response = jsonify({
+                "source": "meta_direct",
+                "range": preset,
+                "since": since,
+                "until": until,
+                "overview": overview,
+                "accounts": account_summaries,
+                "ads": sorted(all_ads, key=lambda x: (x.get("spend", 0), x.get("impressions", 0)), reverse=True),
+                "errors": all_errors,
+                "needs_windsor_key": False,
+            })
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            return response
+
     windsor_key = _windsor_key()
     if windsor_key:
         result = _windsor_report(windsor_key, since, until, selected)
         result.update({
-            "source": "windsor",
+            "source": "windsor_fallback",
             "range": preset,
             "since": since,
             "until": until,
             "needs_windsor_key": False,
         })
-        return jsonify(result)
+        response = jsonify(result)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
 
-    accounts, discovery_errors = _discover_accounts()
-    if selected != "all":
-        accounts = [a for a in accounts if a["id"] == selected]
-
-    reports = []
-    with ThreadPoolExecutor(max_workers=min(6, max(1, len(accounts)))) as pool:
-        futures = [pool.submit(_fetch_account_report, a, since, until) for a in accounts]
-        for future in as_completed(futures):
-            try:
-                reports.append(future.result())
-            except Exception as exc:
-                reports.append({"error": {"message": str(exc)}, "ads": []})
-
-    all_ads = []
-    account_summaries = []
-    currencies = set()
-    for report in reports:
-        if report.get("account"):
-            currencies.add(report["account"].get("currency") or "")
-        all_ads.extend(report.get("ads") or [])
-        if report.get("account") and report.get("summary"):
-            account_summaries.append({
-                "account": report["account"],
-                "summary": report["summary"],
-                "error": report.get("error"),
-            })
-
-    currencies.discard("")
-    same_currency = len(currencies) <= 1
-    spend = round(sum((x.get("summary") or {}).get("spend", 0) for x in reports), 2)
-    impressions = sum((x.get("summary") or {}).get("impressions", 0) for x in reports)
-    reach = sum((x.get("summary") or {}).get("reach", 0) for x in reports)
-    clicks = sum((x.get("summary") or {}).get("clicks", 0) for x in reports)
-    results = sum((x.get("summary") or {}).get("results", 0) for x in reports)
-
-    overview = {
-        "spend": spend if same_currency else None,
-        "currency": next(iter(currencies), "") if same_currency else "MULTI",
-        "impressions": impressions,
-        "reach": reach,
-        "clicks": clicks,
-        "ctr": round(clicks / impressions * 100, 2) if impressions else 0,
-        "cpc": round(spend / clicks, 2) if clicks and same_currency else None,
-        "results": results,
-        "cost_per_result": round(spend / results, 2) if results and same_currency else None,
-        "active_ads": sum((x.get("summary") or {}).get("active_ads", 0) for x in reports),
-        "review_ads": sum((x.get("summary") or {}).get("review_ads", 0) for x in reports),
-        "disapproved_ads": sum((x.get("summary") or {}).get("disapproved_ads", 0) for x in reports),
-    }
-
-    all_errors = discovery_errors + [r.get("error") for r in reports if r.get("error")]
-    return jsonify({
-        "source": "meta_direct",
+    response = jsonify({
+        "source": "unavailable",
         "range": preset,
         "since": since,
         "until": until,
-        "overview": overview,
-        "accounts": account_summaries,
-        "ads": sorted(all_ads, key=lambda x: (x.get("spend", 0), x.get("impressions", 0)), reverse=True),
-        "errors": all_errors,
-        "needs_windsor_key": bool(all_errors and not all_ads),
+        "overview": {},
+        "accounts": [],
+        "ads": [],
+        "errors": [{"message": "No usable Meta or Windsor data source is configured."}],
+        "needs_windsor_key": True,
     })
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
 
 # ---------- existing control endpoints ----------
