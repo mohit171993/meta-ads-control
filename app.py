@@ -586,7 +586,6 @@ WINDSOR_FIELDS = ",".join([
     "campaign_id","campaign","campaign_effective_status",
     "adset_id","adset_name","adset_effective_status",
     "ad_id","ad_name","status","effective_status",
-    "thumbnail_url","title","body","website_destination_url",
     "spend","impressions","reach","clicks","ctr","cpc","cpm","frequency",
     "actions_link_click","actions_landing_page_view","actions_leadgen_grouped",
     "actions_complete_registration",
@@ -737,6 +736,37 @@ def _windsor_accounts(api_key):
             "timezone": row.get("account_timezone") or "",
             "account_status": _windsor_account_status_code(row.get("account_status") or "UNKNOWN"),
         }
+
+    # Some newly connected Meta accounts return only account_id/status on a pure
+    # account-dimension query. Enrich those incomplete cards from a lightweight
+    # recent reporting query, which reliably returns account_name/currency/timezone.
+    incomplete = {
+        aid for aid, meta in found.items()
+        if meta["name"] == f"Ad Account {aid}" or not meta.get("currency")
+    }
+    if incomplete:
+        today = date.today()
+        enrich_rows, enrich_err = _windsor_rows(
+            api_key,
+            "account_id,account_name,account_status,currency,account_timezone,spend,date",
+            date_from=(today - timedelta(days=30)).isoformat(),
+            date_to=today.isoformat(),
+        )
+        if not enrich_err:
+            for row in enrich_rows:
+                aid = str(row.get("account_id") or "").removeprefix("act_")
+                if aid not in incomplete or aid not in found:
+                    continue
+                meta = found[aid]
+                if row.get("account_name"):
+                    meta["name"] = row["account_name"]
+                if row.get("currency"):
+                    meta["currency"] = row["currency"]
+                if row.get("account_timezone"):
+                    meta["timezone"] = row["account_timezone"]
+                if row.get("account_status"):
+                    meta["account_status"] = _windsor_account_status_code(row["account_status"])
+
     return list(found.values()), []
 
 
