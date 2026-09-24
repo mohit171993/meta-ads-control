@@ -586,6 +586,7 @@ WINDSOR_FIELDS = ",".join([
     "campaign_id","campaign","campaign_effective_status",
     "adset_id","adset_name","adset_effective_status",
     "ad_id","ad_name","status","effective_status",
+    "thumbnail_url","title","body","website_destination_url",
     "spend","impressions","reach","clicks","ctr","cpc","cpm","frequency",
     "actions_link_click","actions_landing_page_view","actions_leadgen_grouped",
     "actions_complete_registration",
@@ -766,7 +767,7 @@ def _windsor_report(api_key, since, until, selected="all"):
     # and overlay it after aggregating performance metrics.
     live_rows, live_err = _windsor_rows(
         api_key,
-        "account_id,ad_id,status,effective_status,campaign_effective_status,adset_effective_status",
+        "account_id,ad_id,status,effective_status,campaign_effective_status,adset_effective_status,thumbnail_url,title,body,website_destination_url",
         select_accounts=selected,
         include_objects_without_insights=True,
     )
@@ -782,6 +783,10 @@ def _windsor_report(api_key, since, until, selected="all"):
                 "effective_status": item.get("effective_status") or item.get("status") or "",
                 "campaign_status": item.get("campaign_effective_status") or "",
                 "adset_status": item.get("adset_effective_status") or "",
+                "thumbnail_url": item.get("thumbnail_url") or "",
+                "creative_title": item.get("title") or "",
+                "creative_body": item.get("body") or "",
+                "website_destination_url": item.get("website_destination_url") or "",
             }
 
     # Windsor returns one row per ad/date for multi-day ranges. Aggregate by ad
@@ -825,6 +830,10 @@ def _windsor_report(api_key, since, until, selected="all"):
                 "ad_name": item.get("ad_name") or "",
                 "status": item.get("status") or "",
                 "effective_status": item.get("effective_status") or item.get("status") or "",
+                "thumbnail_url": item.get("thumbnail_url") or "",
+                "creative_title": item.get("title") or "",
+                "creative_body": item.get("body") or "",
+                "website_destination_url": item.get("website_destination_url") or "",
                 "spend": 0.0,
                 "impressions": 0,
                 "reach": 0,
@@ -862,6 +871,12 @@ def _windsor_report(api_key, since, until, selected="all"):
         )
         out["campaign_status"] = item.get("campaign_effective_status") or out["campaign_status"]
         out["adset_status"] = item.get("adset_effective_status") or out["adset_status"]
+        out["thumbnail_url"] = item.get("thumbnail_url") or out["thumbnail_url"]
+        out["creative_title"] = item.get("title") or out["creative_title"]
+        out["creative_body"] = item.get("body") or out["creative_body"]
+        out["website_destination_url"] = (
+            item.get("website_destination_url") or out["website_destination_url"]
+        )
 
     rows = []
     for out in grouped.values():
@@ -873,6 +888,12 @@ def _windsor_report(api_key, since, until, selected="all"):
             )
             out["campaign_status"] = current["campaign_status"] or out["campaign_status"]
             out["adset_status"] = current["adset_status"] or out["adset_status"]
+            out["thumbnail_url"] = current.get("thumbnail_url") or out["thumbnail_url"]
+            out["creative_title"] = current.get("creative_title") or out["creative_title"]
+            out["creative_body"] = current.get("creative_body") or out["creative_body"]
+            out["website_destination_url"] = (
+                current.get("website_destination_url") or out["website_destination_url"]
+            )
 
         # Show the ad's explicit pause/archive state immediately. Otherwise use
         # effective status so inherited states such as ADSET_PAUSED remain visible.
