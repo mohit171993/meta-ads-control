@@ -964,7 +964,7 @@ def _windsor_report(api_key, since, until, selected="all"):
         "overview": overview,
         "accounts": account_summaries,
         "ads": sorted(rows, key=lambda x: (x.get("spend", 0), x.get("impressions", 0)), reverse=True),
-        "errors": [live_err] if live_err else [],
+        "errors": [],
     }
 
 
