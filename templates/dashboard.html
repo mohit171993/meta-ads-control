@@ -130,7 +130,7 @@ tbody tr:hover{background:#15203a}
         <tbody id="adRows"></tbody>
       </table>
     </div>
-    <div class="footer">Meta reporting can have a short delay. “Live” here means the latest data available from Meta’s Marketing API.</div>
+    <div class="footer">Spend/results use the selected reporting period. Ad status is refreshed separately from the current Windsor object state so pause/active changes are not taken from historical reporting rows.</div>
   </div>
 </div>
 
@@ -222,9 +222,10 @@ function renderRows(){
   const sf=document.getElementById('statusFilter').value;
   const sort=document.getElementById('metricSort').value;
   let rows=rawAds.filter(x=>{
-    const hay=[x.account_name,x.campaign_name,x.adset_name,x.ad_name,x.effective_status].join(' ').toLowerCase();
+    const shownStatus=x.display_status||x.effective_status||x.status||'';
+    const hay=[x.account_name,x.campaign_name,x.adset_name,x.ad_name,shownStatus,x.effective_status,x.status].join(' ').toLowerCase();
     if(q&&!hay.includes(q)) return false;
-    const st=String(x.effective_status||'').toUpperCase();
+    const st=String(shownStatus).toUpperCase();
     if(sf==='ACTIVE'&&st!=='ACTIVE') return false;
     if(sf==='PAUSED'&&!['PAUSED','ADSET_PAUSED','CAMPAIGN_PAUSED'].includes(st)) return false;
     if(sf==='review'&&!['IN_PROCESS','PENDING_REVIEW','WITH_ISSUES'].includes(st)) return false;
@@ -242,7 +243,7 @@ function renderRows(){
       '<td>'+esc(x.campaign_name)+'</td>'+
       '<td>'+esc(x.adset_name)+'</td>'+
       '<td><b>'+esc(x.ad_name)+'</b><div class="small">'+esc(x.ad_id)+'</div></td>'+
-      '<td>'+badge(x.effective_status)+'</td>'+
+      '<td>'+badge(x.display_status||x.effective_status||x.status)+'</td>'+
       '<td>'+esc(x.result_type)+'</td>'+
       '<td>'+n(x.results)+'</td>'+
       '<td>'+money(x.cost_per_result,x.currency)+'</td>'+
