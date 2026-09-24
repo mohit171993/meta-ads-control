@@ -92,7 +92,7 @@ tbody tr:hover{background:#15203a}
         <div class="mini"><div class="small">In review</div><b id="hReview">0</b></div>
         <div class="mini"><div class="small">Disapproved</div><b id="hDisapproved">0</b></div>
       </div>
-      <div class="footer" id="rangeLabel"></div>
+      <div class="footer" id="rangeLabel"></div><div class="footer" id="syncLabel">Last synced: —</div>
     </div>
   </div>
 
@@ -135,7 +135,7 @@ tbody tr:hover{background:#15203a}
 </div>
 
 <script>
-let currentRange='today', rawAds=[], accountMap={};
+let currentRange='today', rawAds=[], accountMap={}, reportRequestSeq=0, reportLoading=false, reportPending=false;
 
 function esc(v){ return String(v??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s])); }
 function n(v){ return Number(v||0).toLocaleString(); }
@@ -177,10 +177,33 @@ async function loadAccounts(){
   });
 }
 async function loadReport(){
+  if(reportLoading){ reportPending=true; return; }
+  reportLoading=true;
+  reportPending=false;
+  const seq=++reportRequestSeq;
   document.getElementById('refreshBtn').textContent='Refreshing…';
   const account=document.getElementById('accountSel').value||'all';
-  const r=await fetch('/api/report?range='+encodeURIComponent(currentRange)+'&account='+encodeURIComponent(account)+'&_ts='+Date.now(),{cache:'no-store'});
-  const j=await r.json();
+  let j;
+  try{
+    const r=await fetch('/api/report?range='+encodeURIComponent(currentRange)+'&account='+encodeURIComponent(account)+'&_ts='+Date.now(),{cache:'no-store'});
+    j=await r.json();
+  }catch(e){
+    if(seq===reportRequestSeq){
+      const el=document.getElementById('error');
+      el.style.display='block';
+      el.textContent='Live refresh failed. Retrying automatically.';
+    }
+    reportLoading=false;
+    document.getElementById('refreshBtn').textContent='Refresh now';
+    if(reportPending) loadReport();
+    return;
+  }
+  if(seq!==reportRequestSeq){
+    reportLoading=false;
+    document.getElementById('refreshBtn').textContent='Refresh now';
+    if(reportPending) loadReport();
+    return;
+  }
   document.getElementById('refreshBtn').textContent='Refresh now';
 
   if(j.errors&&j.errors.filter(Boolean).length){
@@ -200,6 +223,8 @@ async function loadReport(){
   document.getElementById('hReview').textContent=n(o.review_ads);
   document.getElementById('hDisapproved').textContent=n(o.disapproved_ads);
   document.getElementById('rangeLabel').textContent='Reporting period: '+j.since+' → '+j.until;
+  const source=(j.source||'unknown').replaceAll('_',' ');
+  document.getElementById('syncLabel').textContent='Last synced: '+new Date().toLocaleTimeString()+' · Source: '+source;
 
   const grid=document.getElementById('accountGrid');grid.innerHTML='';
   (j.accounts||[]).forEach(x=>{
@@ -215,6 +240,8 @@ async function loadReport(){
     grid.appendChild(div);
   });
   rawAds=j.ads||[]; renderRows();
+  reportLoading=false;
+  if(reportPending) loadReport();
 }
 
 function renderRows(){
