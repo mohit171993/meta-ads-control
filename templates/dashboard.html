@@ -55,6 +55,19 @@ tbody tr:hover{background:#15203a}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.filters input{min-width:260px}
 .err{background:#4b1c24;color:#ffd9df;padding:10px;border-radius:10px;margin:8px 0;display:none}
 .footer{color:var(--muted);font-size:11px;margin-top:10px}
+.batraxy-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.batraxy-head a{color:#9db8ff;font-size:12px}
+.batraxy-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px;margin:10px 0 14px}
+.batraxy-card{background:linear-gradient(180deg,var(--panel2),#0e1628);border:1px solid var(--line);border-radius:12px;padding:12px}
+.batraxy-card .k{font-size:11px;color:var(--muted)}
+.batraxy-card .v{font-size:21px;font-weight:800;margin-top:4px}
+.batraxy-table{min-width:820px}
+.batraxy-table th,.batraxy-table td{text-align:right}
+.batraxy-table th:first-child,.batraxy-table td:first-child{text-align:left}
+.batraxy-referrers{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.ref-pill{border:1px solid var(--line);background:#0e1628;border-radius:999px;padding:6px 9px;font-size:11px;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.batraxy-note{font-size:11px;color:var(--muted);margin-top:8px}
+@media(max-width:900px){.batraxy-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:1100px){.cards{grid-template-columns:repeat(4,1fr)}.row{grid-template-columns:1fr}}
 @media(max-width:650px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:12px}}
 </style>
@@ -103,6 +116,40 @@ tbody tr:hover{background:#15203a}
       </div>
       <div class="footer" id="rangeLabel"></div><div class="footer" id="syncLabel">Last synced: —</div>
     </div>
+  </div>
+
+  <div class="panel" id="batraxyPanel" style="margin-bottom:12px">
+    <div class="batraxy-head">
+      <div>
+        <h3 style="margin-bottom:3px">Batraxy Landing Page</h3>
+        <div class="small">www.batraxy.com · live landing and CTA funnel</div>
+      </div>
+      <a href="https://www.batraxy.com" target="_blank" rel="noopener">Open landing page ↗</a>
+    </div>
+    <div id="batraxyError" class="err" style="margin-top:10px"></div>
+    <div class="batraxy-grid">
+      <div class="batraxy-card"><div class="k">Landing visits · 24h</div><div class="v" id="bVisits">—</div></div>
+      <div class="batraxy-card"><div class="k">Unique visitors · 24h</div><div class="v" id="bUnique">—</div></div>
+      <div class="batraxy-card"><div class="k">Affiliate clicks · 24h</div><div class="v" id="bAffiliate">—</div></div>
+      <div class="batraxy-card"><div class="k">Telegram clicks · 24h</div><div class="v" id="bTelegram">—</div></div>
+      <div class="batraxy-card"><div class="k">Any CTA CTR · 24h</div><div class="v" id="bCtr">—</div></div>
+    </div>
+    <div class="table-wrap" style="max-height:none">
+      <table class="batraxy-table">
+        <thead>
+          <tr>
+            <th>Period</th><th>Landing visits</th><th>Unique visitors</th>
+            <th>Affiliate clicks</th><th>Telegram clicks</th><th>Total CTA clicks</th>
+            <th>Affiliate CTR</th><th>Telegram CTR</th><th>Any CTA CTR</th>
+          </tr>
+        </thead>
+        <tbody id="batraxyRows"></tbody>
+      </table>
+    </div>
+    <div class="small" style="margin-top:10px">Top referrers · last 30 days</div>
+    <div id="batraxyReferrers" class="batraxy-referrers"></div>
+    <div id="batraxySync" class="batraxy-note">Last synced: —</div>
+    <div class="batraxy-note">Landing visits are deduplicated per device for 30 minutes; accidental double-tap CTA clicks are deduplicated for 5 seconds. Raw IP addresses are not stored.</div>
   </div>
 
   <div class="panel">
@@ -254,6 +301,60 @@ async function loadReport(){
   if(reportPending) loadReport();
 }
 
+async function loadBatraxy(){
+  const err=document.getElementById('batraxyError');
+  try{
+    const r=await fetch('/api/batraxy?_ts='+Date.now(),{cache:'no-store'});
+    const j=await r.json();
+    if(!j.ok||!j.data){
+      err.style.display='block';
+      err.textContent='Batraxy analytics unavailable: '+(j.error||'unknown error');
+      return;
+    }
+    err.style.display='none';
+    const data=j.data||{}, periods=data.periods||{}, d24=periods['24h']||{};
+    document.getElementById('bVisits').textContent=n(d24.landing_visits);
+    document.getElementById('bUnique').textContent=n(d24.unique_visitors);
+    document.getElementById('bAffiliate').textContent=n(d24.affiliate_clicks);
+    document.getElementById('bTelegram').textContent=n(d24.telegram_clicks);
+    document.getElementById('bCtr').textContent=Number(d24.cta_ctr||0).toFixed(2)+'%';
+
+    const labels=[['24h','Last 24 hours'],['7d','7 days'],['30d','30 days'],['all','All time']];
+    const tb=document.getElementById('batraxyRows');tb.innerHTML='';
+    labels.forEach(([key,label])=>{
+      const x=periods[key]||{};
+      const tr=document.createElement('tr');
+      tr.innerHTML='<td><b>'+esc(label)+'</b></td>'+
+        '<td>'+n(x.landing_visits)+'</td>'+
+        '<td>'+n(x.unique_visitors)+'</td>'+
+        '<td>'+n(x.affiliate_clicks)+'</td>'+
+        '<td>'+n(x.telegram_clicks)+'</td>'+
+        '<td>'+n(x.total_cta_clicks)+'</td>'+
+        '<td>'+Number(x.affiliate_ctr||0).toFixed(2)+'%</td>'+
+        '<td>'+Number(x.telegram_ctr||0).toFixed(2)+'%</td>'+
+        '<td>'+Number(x.cta_ctr||0).toFixed(2)+'%</td>';
+      tb.appendChild(tr);
+    });
+
+    const refs=document.getElementById('batraxyReferrers');refs.innerHTML='';
+    const refRows=data.top_referrers_30d||[];
+    if(!refRows.length){
+      refs.innerHTML='<span class="ref-pill">No referrer data yet</span>';
+    }else{
+      refRows.forEach(x=>{
+        const span=document.createElement('span');span.className='ref-pill';
+        span.title=String(x.referer||'');
+        span.textContent=(x.referer||'Direct / unknown')+' · '+n(x.visits)+' visits';
+        refs.appendChild(span);
+      });
+    }
+    document.getElementById('batraxySync').textContent='Last synced: '+new Date().toLocaleTimeString();
+  }catch(e){
+    err.style.display='block';
+    err.textContent='Batraxy analytics refresh failed. Retrying automatically.';
+  }
+}
+
 function renderRows(){
   const q=document.getElementById('search').value.toLowerCase().trim();
   const sf=document.getElementById('statusFilter').value;
@@ -314,17 +415,17 @@ document.querySelectorAll('.rangeBtn').forEach(b=>b.addEventListener('click',()=
   currentRange=b.dataset.range;document.querySelectorAll('.rangeBtn').forEach(x=>x.classList.remove('activeBtn'));b.classList.add('activeBtn');loadReport();
 }));
 document.getElementById('accountSel').addEventListener('change',loadReport);
-document.getElementById('refreshBtn').addEventListener('click',loadReport);
+document.getElementById('refreshBtn').addEventListener('click',()=>{loadReport();loadBatraxy();});
 document.getElementById('search').addEventListener('input',renderRows);
 document.getElementById('statusFilter').addEventListener('change',renderRows);
 document.getElementById('metricSort').addEventListener('change',renderRows);
 
 (async()=>{
     await loadAccounts();
-    await loadReport();
-    setInterval(()=>{ if(!document.hidden) loadReport(); },15000);
-    document.addEventListener('visibilitychange',()=>{ if(!document.hidden) loadReport(); });
-    window.addEventListener('focus',()=>{ if(!document.hidden) loadReport(); });
+    await Promise.all([loadReport(),loadBatraxy()]);
+    setInterval(()=>{ if(!document.hidden){ loadReport(); loadBatraxy(); } },15000);
+    document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ loadReport(); loadBatraxy(); } });
+    window.addEventListener('focus',()=>{ if(!document.hidden){ loadReport(); loadBatraxy(); } });
   })();
 </script>
 </body>
