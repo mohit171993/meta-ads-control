@@ -1040,80 +1040,131 @@ def api_report():
     preset, since, until = _date_range()
     selected = (request.args.get("account") or "all").removeprefix("act_")
 
-    # Prefer Meta's Marketing API for the live dashboard whenever the configured
-    # token can see the requested account. Windsor remains a fallback source.
-    if _tokens():
-        accounts, discovery_errors = _discover_accounts()
-        if selected != "all":
-            accounts = [a for a in accounts if a["id"] == selected]
-
-        if accounts:
-            reports = []
-            with ThreadPoolExecutor(max_workers=min(6, max(1, len(accounts)))) as pool:
-                futures = [pool.submit(_fetch_account_report, a, since, until) for a in accounts]
-                for future in as_completed(futures):
-                    try:
-                        reports.append(future.result())
-                    except Exception as exc:
-                        reports.append({"error": {"message": str(exc)}, "ads": []})
-
-            all_ads = []
-            account_summaries = []
-            currencies = set()
-            for report in reports:
-                if report.get("account"):
-                    currencies.add(report["account"].get("currency") or "")
-                all_ads.extend(report.get("ads") or [])
-                if report.get("account") and report.get("summary"):
-                    account_summaries.append({
-                        "account": report["account"],
-                        "summary": report["summary"],
-                        "error": report.get("error"),
-                    })
-
-            currencies.discard("")
-            same_currency = len(currencies) <= 1
-            spend = round(sum((x.get("summary") or {}).get("spend", 0) for x in reports), 2)
-            impressions = sum((x.get("summary") or {}).get("impressions", 0) for x in reports)
-            reach = sum((x.get("summary") or {}).get("reach", 0) for x in reports)
-            clicks = sum((x.get("summary") or {}).get("clicks", 0) for x in reports)
-            results = sum((x.get("summary") or {}).get("results", 0) for x in reports)
-
-            overview = {
-                "spend": spend if same_currency else None,
-                "currency": next(iter(currencies), "") if same_currency else "MULTI",
-                "impressions": impressions,
-                "reach": reach,
-                "clicks": clicks,
-                "ctr": round(clicks / impressions * 100, 2) if impressions else 0,
-                "cpc": round(spend / clicks, 2) if clicks and same_currency else None,
-                "results": results,
-                "cost_per_result": round(spend / results, 2) if results and same_currency else None,
-                "active_ads": sum((x.get("summary") or {}).get("active_ads", 0) for x in reports),
-                "review_ads": sum((x.get("summary") or {}).get("review_ads", 0) for x in reports),
-                "disapproved_ads": sum((x.get("summary") or {}).get("disapproved_ads", 0) for x in reports),
-            }
-
-            all_errors = discovery_errors + [r.get("error") for r in reports if r.get("error")]
-            response = jsonify({
-                "source": "meta_direct",
-                "range": preset,
-                "since": since,
-                "until": until,
-                "overview": overview,
-                "accounts": account_summaries,
-                "ads": sorted(all_ads, key=lambda x: (x.get("spend", 0), x.get("impressions", 0)), reverse=True),
-                "errors": all_errors,
-                "needs_windsor_key": False,
-            })
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-            return response
-
+    # Windsor is the resilient source for the full dashboard dataset.
+    # Direct Meta is used only as a best-effort live-status overlay so a token
+    # or permission problem can never blank the dashboard.
     windsor_key = _windsor_key()
     if windsor_key:
         result = _windsor_report(windsor_key, since, until, selected)
+        ads = result.get("ads") or []
+
+        live_meta_applied = False
+        if ads and _tokens():
+            try:
+                discovered, _ = _discover_accounts()
+                account_by_id = {str(a.get("id") or ""): a for a in discovered if a.get("id")}
+
+                # _discover_accounts() already keeps the configured account visible
+                # when /me/adaccounts is incomplete, using the first configured token.
+                for aid in sorted({str(x.get("account_id") or "") for x in ads if x.get("account_id")}):
+                    account = account_by_id.get(aid)
+                    if not account or not account.get("_token"):
+                        continue
+                    token = account["_token"]
+
+                    live_ads, ads_err = _paginate(
+                        token,
+                        f"act_{aid}/ads",
+                        {"fields": "id,status,effective_status,adset_id,campaign_id", "limit": 500},
+                    )
+                    live_adsets, adsets_err = _paginate(
+                        token,
+                        f"act_{aid}/adsets",
+                        {"fields": "id,status,effective_status,campaign_id", "limit": 500},
+                    )
+                    live_campaigns, campaigns_err = _paginate(
+                        token,
+                        f"act_{aid}/campaigns",
+                        {"fields": "id,status,effective_status", "limit": 500},
+                    )
+
+                    # Overlay only when all live object reads succeeded. Any Meta
+                    # failure is ignored so Windsor remains fully usable.
+                    if ads_err or adsets_err or campaigns_err:
+                        continue
+
+                    ad_by_id = {str(x.get("id")): x for x in live_ads if x.get("id")}
+                    adset_by_id = {str(x.get("id")): x for x in live_adsets if x.get("id")}
+                    campaign_by_id = {str(x.get("id")): x for x in live_campaigns if x.get("id")}
+
+                    for row in ads:
+                        if str(row.get("account_id") or "") != aid:
+                            continue
+
+                        ad = ad_by_id.get(str(row.get("ad_id") or ""))
+                        aset = adset_by_id.get(str(row.get("adset_id") or ""))
+                        camp = campaign_by_id.get(str(row.get("campaign_id") or ""))
+
+                        if ad:
+                            row["status"] = ad.get("status") or row.get("status") or ""
+                            row["effective_status"] = (
+                                ad.get("effective_status") or ad.get("status")
+                                or row.get("effective_status") or ""
+                            )
+                        if aset:
+                            row["adset_status"] = (
+                                aset.get("effective_status") or aset.get("status")
+                                or row.get("adset_status") or ""
+                            )
+                        if camp:
+                            row["campaign_status"] = (
+                                camp.get("effective_status") or camp.get("status")
+                                or row.get("campaign_status") or ""
+                            )
+
+                        own_status = str(row.get("status") or "").upper()
+                        effective_status = str(
+                            row.get("effective_status") or own_status
+                        ).upper()
+                        row["display_status"] = (
+                            own_status
+                            if own_status in {"PAUSED", "ARCHIVED"}
+                            else (effective_status or own_status)
+                        )
+
+                    live_meta_applied = True
+            except Exception:
+                # Never let the optional direct-Meta overlay break the dashboard.
+                live_meta_applied = False
+
+        # Recalculate only the status health counters after any overlay. Performance
+        # metrics remain the selected-period Windsor/Meta reporting values.
+        if live_meta_applied:
+            per_account = {}
+            for row in ads:
+                aid = str(row.get("account_id") or "")
+                counts = per_account.setdefault(
+                    aid, {"active_ads": 0, "review_ads": 0, "disapproved_ads": 0}
+                )
+                state = str(
+                    row.get("display_status")
+                    or row.get("effective_status")
+                    or row.get("status")
+                    or ""
+                ).upper()
+                if state == "ACTIVE":
+                    counts["active_ads"] += 1
+                if state in {"IN_PROCESS", "PENDING_REVIEW", "WITH_ISSUES"}:
+                    counts["review_ads"] += 1
+                if state == "DISAPPROVED":
+                    counts["disapproved_ads"] += 1
+
+            for entry in result.get("accounts") or []:
+                account = entry.get("account") or {}
+                summary = entry.get("summary") or {}
+                counts = per_account.get(str(account.get("id") or ""))
+                if counts:
+                    summary.update(counts)
+
+            overview = result.get("overview") or {}
+            overview["active_ads"] = sum(x["active_ads"] for x in per_account.values())
+            overview["review_ads"] = sum(x["review_ads"] for x in per_account.values())
+            overview["disapproved_ads"] = sum(
+                x["disapproved_ads"] for x in per_account.values()
+            )
+
         result.update({
-            "source": "windsor_fallback",
+            "source": "windsor_with_meta_live" if live_meta_applied else "windsor",
             "range": preset,
             "since": since,
             "until": until,
@@ -1123,16 +1174,72 @@ def api_report():
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         return response
 
+    # If Windsor is unavailable, direct Meta can still serve the dashboard.
+    accounts, discovery_errors = _discover_accounts()
+    if selected != "all":
+        accounts = [a for a in accounts if a["id"] == selected]
+
+    reports = []
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(accounts)))) as pool:
+        futures = [pool.submit(_fetch_account_report, a, since, until) for a in accounts]
+        for future in as_completed(futures):
+            try:
+                reports.append(future.result())
+            except Exception as exc:
+                reports.append({"error": {"message": str(exc)}, "ads": []})
+
+    all_ads = []
+    account_summaries = []
+    currencies = set()
+    for report in reports:
+        if report.get("account"):
+            currencies.add(report["account"].get("currency") or "")
+        all_ads.extend(report.get("ads") or [])
+        if report.get("account") and report.get("summary"):
+            account_summaries.append({
+                "account": report["account"],
+                "summary": report["summary"],
+                "error": report.get("error"),
+            })
+
+    currencies.discard("")
+    same_currency = len(currencies) <= 1
+    spend = round(sum((x.get("summary") or {}).get("spend", 0) for x in reports), 2)
+    impressions = sum((x.get("summary") or {}).get("impressions", 0) for x in reports)
+    reach = sum((x.get("summary") or {}).get("reach", 0) for x in reports)
+    clicks = sum((x.get("summary") or {}).get("clicks", 0) for x in reports)
+    results = sum((x.get("summary") or {}).get("results", 0) for x in reports)
+
+    overview = {
+        "spend": spend if same_currency else None,
+        "currency": next(iter(currencies), "") if same_currency else "MULTI",
+        "impressions": impressions,
+        "reach": reach,
+        "clicks": clicks,
+        "ctr": round(clicks / impressions * 100, 2) if impressions else 0,
+        "cpc": round(spend / clicks, 2) if clicks and same_currency else None,
+        "results": results,
+        "cost_per_result": round(spend / results, 2) if results and same_currency else None,
+        "active_ads": sum((x.get("summary") or {}).get("active_ads", 0) for x in reports),
+        "review_ads": sum((x.get("summary") or {}).get("review_ads", 0) for x in reports),
+        "disapproved_ads": sum((x.get("summary") or {}).get("disapproved_ads", 0) for x in reports),
+    }
+
+    all_errors = discovery_errors + [r.get("error") for r in reports if r.get("error")]
     response = jsonify({
-        "source": "unavailable",
+        "source": "meta_direct",
         "range": preset,
         "since": since,
         "until": until,
-        "overview": {},
-        "accounts": [],
-        "ads": [],
-        "errors": [{"message": "No usable Meta or Windsor data source is configured."}],
-        "needs_windsor_key": True,
+        "overview": overview,
+        "accounts": account_summaries,
+        "ads": sorted(
+            all_ads,
+            key=lambda x: (x.get("spend", 0), x.get("impressions", 0)),
+            reverse=True,
+        ),
+        "errors": all_errors,
+        "needs_windsor_key": bool(all_errors and not all_ads),
     })
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return response
