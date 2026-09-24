@@ -761,6 +761,29 @@ def _windsor_report(api_key, since, until, selected="all"):
             "errors": [err],
         }
 
+    # Reporting rows are date-filtered and can carry a stale object status.
+    # Fetch current object status separately (without a reporting date range)
+    # and overlay it after aggregating performance metrics.
+    live_rows, live_err = _windsor_rows(
+        api_key,
+        "account_id,ad_id,status,effective_status,campaign_effective_status,adset_effective_status",
+        select_accounts=selected,
+        include_objects_without_insights=True,
+    )
+    live_status = {}
+    if not live_err:
+        for item in live_rows:
+            aid = str(item.get("account_id") or "").removeprefix("act_")
+            ad_id = str(item.get("ad_id") or "")
+            if not aid or not ad_id:
+                continue
+            live_status[(aid, ad_id)] = {
+                "status": item.get("status") or "",
+                "effective_status": item.get("effective_status") or item.get("status") or "",
+                "campaign_status": item.get("campaign_effective_status") or "",
+                "adset_status": item.get("adset_effective_status") or "",
+            }
+
     # Windsor returns one row per ad/date for multi-day ranges. Aggregate by ad
     # so ad counts and totals are not multiplied by the number of days.
     grouped = {}
@@ -842,6 +865,23 @@ def _windsor_report(api_key, since, until, selected="all"):
 
     rows = []
     for out in grouped.values():
+        current = live_status.get((out["account_id"], out["ad_id"]))
+        if current:
+            out["status"] = current["status"] or out["status"]
+            out["effective_status"] = (
+                current["effective_status"] or current["status"] or out["effective_status"]
+            )
+            out["campaign_status"] = current["campaign_status"] or out["campaign_status"]
+            out["adset_status"] = current["adset_status"] or out["adset_status"]
+
+        # Show the ad's explicit pause/archive state immediately. Otherwise use
+        # effective status so inherited states such as ADSET_PAUSED remain visible.
+        own_status = str(out.get("status") or "").upper()
+        effective_status = str(out.get("effective_status") or own_status).upper()
+        out["display_status"] = (
+            own_status if own_status in {"PAUSED", "ARCHIVED"} else (effective_status or own_status)
+        )
+
         out["spend"] = round(out["spend"], 2)
         out["ctr"] = round(
             (out["clicks"] / out["impressions"] * 100) if out["impressions"] else 0,
@@ -924,7 +964,7 @@ def _windsor_report(api_key, since, until, selected="all"):
         "overview": overview,
         "accounts": account_summaries,
         "ads": sorted(rows, key=lambda x: (x.get("spend", 0), x.get("impressions", 0)), reverse=True),
-        "errors": [],
+        "errors": [live_err] if live_err else [],
     }
 
 
