@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <meta name="theme-color" content="#111827"/>
+  <link rel="manifest" href="/manifest.webmanifest"/>
+  <link rel="icon" href="/icon.svg"/>
+  <link rel="stylesheet" href="/styles.css"/>
+  <title>Affiliar Performance</title>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Affiliar Performance</h1>
+      <p id="subtitle">Affiliate dashboard</p>
+    </div>
+    <span id="mode" class="badge">Loading</span>
+  </header>
+
+  <main>
+    <section class="filters">
+      <button data-range="today">Today</button>
+      <button class="active" data-range="7">7D</button>
+      <button data-range="30">30D</button>
+      <button data-range="90">90D</button>
+      <button id="refresh">↻</button>
+    </section>
+
+    <section class="grid" id="cards"></section>
+
+    <section class="panel">
+      <div class="panel-title"><h2>Campaigns</h2><span id="updated"></span></div>
+      <div id="campaigns" class="campaigns"></div>
+    </section>
+
+    <section class="panel help">
+      <h2>Live API connection</h2>
+      <p id="apiHelp">This app is running in demo mode until Affiliar API credentials are added to Railway.</p>
+    </section>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
