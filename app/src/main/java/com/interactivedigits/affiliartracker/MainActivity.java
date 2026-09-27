@@ -3,13 +3,13 @@ package com.interactivedigits.affiliartracker;
 import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.view.Gravity;
 import android.view.ViewGroup;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 public class MainActivity extends Activity {
     private static final String DASHBOARD_URL =
@@ -27,13 +27,42 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.rgb(11, 16, 32));
         getWindow().setNavigationBarColor(Color.rgb(11, 16, 32));
 
-        FrameLayout root = new FrameLayout(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.rgb(11, 16, 32));
+
+        LinearLayout toolbar = new LinearLayout(this);
+        toolbar.setOrientation(LinearLayout.HORIZONTAL);
+        toolbar.setPadding(dp(14), dp(8), dp(10), dp(8));
+        toolbar.setBackgroundColor(Color.rgb(22, 29, 44));
+
+        TextView title = new TextView(this);
+        title.setText("Affiliar Tracker");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(18);
+        title.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+        LinearLayout.LayoutParams titleParams =
+                new LinearLayout.LayoutParams(0, dp(52), 1f);
+        toolbar.addView(title, titleParams);
+
+        Button refreshButton = new Button(this);
+        refreshButton.setText("REFRESH");
+        refreshButton.setTextColor(Color.WHITE);
+        refreshButton.setTextSize(14);
+        refreshButton.setAllCaps(false);
+        refreshButton.setBackgroundColor(Color.rgb(37, 99, 235));
+
+        LinearLayout.LayoutParams refreshParams =
+                new LinearLayout.LayoutParams(dp(110), dp(52));
+        toolbar.addView(refreshButton, refreshParams);
+
+        root.addView(toolbar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
 
         webView = new WebView(this);
-        webView.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
         webView.setBackgroundColor(Color.rgb(11, 16, 32));
 
         WebSettings settings = webView.getSettings();
@@ -49,36 +78,29 @@ public class MainActivity extends Activity {
         );
 
         webView.setWebViewClient(new WebViewClient());
-        root.addView(webView);
 
-        Button refreshButton = new Button(this);
-        refreshButton.setText("Refresh");
-        refreshButton.setTextColor(Color.WHITE);
-        refreshButton.setBackgroundColor(Color.rgb(37, 99, 235));
-        refreshButton.setAllCaps(false);
+        root.addView(webView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+        ));
 
-        FrameLayout.LayoutParams buttonParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                dp(48)
-        );
-        buttonParams.gravity = Gravity.END | Gravity.BOTTOM;
-        buttonParams.setMargins(dp(16), dp(16), dp(16), dp(20));
-        refreshButton.setLayoutParams(buttonParams);
-
-        refreshButton.setOnClickListener(v -> {
-            webView.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
-            webView.clearCache(true);
-            webView.reload();
-        });
-
-        root.addView(refreshButton);
         setContentView(root);
 
-        if (savedInstanceState == null) {
-            webView.loadUrl(DASHBOARD_URL);
-        } else {
-            webView.restoreState(savedInstanceState);
-        }
+        refreshButton.setOnClickListener(v -> {
+            webView.stopLoading();
+            webView.clearCache(true);
+            webView.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+
+            String current = webView.getUrl();
+            if (current == null || current.isEmpty()) {
+                current = DASHBOARD_URL;
+            }
+            String separator = current.contains("?") ? "&" : "?";
+            webView.loadUrl(current + separator + "_refresh=" + System.currentTimeMillis());
+        });
+
+        webView.loadUrl(DASHBOARD_URL + "?_appv=2");
     }
 
     @Override
@@ -87,12 +109,6 @@ public class MainActivity extends Activity {
         if (webView != null) {
             webView.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
         }
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        webView.saveState(outState);
-        super.onSaveInstanceState(outState);
     }
 
     @Override
@@ -108,6 +124,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         if (webView != null) {
             webView.stopLoading();
+            webView.clearCache(true);
             webView.destroy();
         }
         super.onDestroy();
